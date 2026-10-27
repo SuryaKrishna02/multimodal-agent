@@ -218,3 +218,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- multimodal-agent ---
+.venv/
+.claude/
+data/runtime/
+data/workspace/
+evals/results/
+# Gold recordings are personal (voice, screenshots). Remove these lines to commit them.
+data/gold/**/*.wav
+data/gold/**/*.aiff
+data/gold/**/*.flac
+data/gold/**/*.png
+data/gold/**/*.jpg
+data/gold/**/*.jsonl
+data/gold/**/*.json
+data/gold/**/*.txt

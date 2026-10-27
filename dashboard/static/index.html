@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multimodal Agent</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Multimodal Agent <span class="muted">on-device</span></h1>
+  <div class="status">
+    <label>Tier
+      <select id="tier"><option value="e4b">Gemma 4 E4B</option><option value="e2b">Gemma 4 E2B</option></select>
+    </label>
+    <span id="llm-dot" class="dot"></span>LLM <span id="llm-mem" class="muted"></span>
+    <span id="emb-dot" class="dot"></span>Embed <span id="emb-mem" class="muted"></span>
+    <span class="muted">Hotkey: Ctrl+Option+Space</span>
+    <button id="mic-switch" class="mic live">Mic: ON</button>
+  </div>
+</header>
+
+<main>
+  <section id="left">
+    <div class="card grow">
+      <h2>Chat</h2>
+      <div id="chat-log"></div>
+      <form id="chat-form">
+        <input id="chat-input" placeholder="Ask anything..." autocomplete="off">
+        <label class="inline"><input type="checkbox" id="chat-screen"> + screen</label>
+        <button>Send</button>
+      </form>
+    </div>
+    <div class="card grow">
+      <h2>Event log <input id="event-filter" placeholder="filter (e.g. brain)"></h2>
+      <div id="event-log"></div>
+    </div>
+  </section>
+
+  <section id="right">
+    <nav id="tabs">
+      <button data-tab="serving">1 Serving</button>
+      <button data-tab="senses">2 Senses</button>
+      <button data-tab="brain">3 Brain</button>
+      <button data-tab="memory">4 Memory</button>
+      <button data-tab="tools">5 Tools</button>
+      <button data-tab="tasks">6 Tasks</button>
+      <button data-tab="scorecard">7 Scorecard</button>
+    </nav>
+
+    <div class="panel" id="panel-serving">
+      <div class="card"><h2>Servers</h2><div id="serving-info"></div>
+        <button id="bench-btn">Run benchmark</button></div>
+      <div class="card"><h2>Benchmarks this session</h2>
+        <table id="bench-table"><thead><tr><th>tier</th><th>time to first token</th><th>gen tok/s</th>
+          <th>prompt tok/s</th><th>llm memory</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="panel" id="panel-senses">
+      <div class="card"><h2>Hearing: speech segments and chunks (each chunk &lt; 30 s)</h2>
+        <div class="row"><button id="rec-btn">Record voice note</button>
+          <label class="file">Use WAV file<input type="file" id="wav-file" accept="audio/*"></label></div>
+        <svg id="timeline" viewBox="0 0 1000 90" preserveAspectRatio="none"></svg>
+        <div id="audio-info" class="muted"></div></div>
+      <div class="card"><h2>Seeing: last screenshot</h2>
+        <div class="row"><button id="look-btn2">Capture + help (Task 2)</button></div>
+        <div id="screen-warning" class="warn"></div>
+        <img id="last-screen" alt=""></div>
+    </div>
+
+    <div class="panel" id="panel-brain">
+      <div class="card"><h2>Context budget (estimated tokens)</h2><div id="budget"></div></div>
+      <div class="card"><h2>Exact request sent to the model <span class="muted">(media shortened)</span></h2>
+        <pre id="last-request" class="tall">No request yet.</pre></div>
+      <div class="card"><h2>Reply</h2><pre id="last-reply" class="short"></pre></div>
+    </div>
+
+    <div class="panel" id="panel-memory">
+      <div class="card"><h2>Search</h2>
+        <form id="mem-form" class="row"><input id="mem-q" placeholder="e.g. what do I need to do tomorrow?">
+          <button>Search top 5</button></form>
+        <table id="mem-hits"><tbody></tbody></table></div>
+      <div class="card"><h2>Rejected by the junk filter</h2><table id="mem-rejected"><tbody></tbody></table></div>
+      <div class="card grow"><h2>All memories <button id="mem-clear" class="small danger">clear</button></h2>
+        <table id="mem-all"><thead><tr><th>id</th><th>when</th><th>kind</th><th>text</th></tr></thead>
+          <tbody></tbody></table></div>
+    </div>
+
+    <div class="panel" id="panel-tools">
+      <div class="card"><h2>Waiting for your approval</h2><div id="pending">Nothing pending.</div></div>
+      <div class="card"><h2>Registered tools and permission tiers</h2><table id="tool-list"><tbody></tbody></table></div>
+      <div class="card grow"><h2>Recent calls</h2><table id="tool-calls"><thead><tr><th>tool</th><th>args</th>
+        <th>status</th><th>result / reason</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="panel" id="panel-tasks">
+      <div class="card"><h2>Task 1: voice note to action items</h2>
+        <div class="row"><button id="rec-btn2">Record voice note</button>
+          <label class="file">Use WAV file<input type="file" id="wav-file2" accept="audio/*"></label></div>
+        <div id="task1-out" class="result"></div></div>
+      <div class="card"><h2>Task 2: look at my screen and help</h2>
+        <div class="row"><button id="look-btn">Capture screen now</button>
+          <label class="file">Use screenshot<input type="file" id="img-file" accept="image/*"></label></div>
+        <div id="task2-out" class="result"></div></div>
+    </div>
+
+    <div class="panel" id="panel-scorecard">
+      <div class="card grow"><h2>Scorecard <button id="score-refresh" class="small">refresh</button></h2>
+        <table id="scorecard"><thead><tr><th>level</th><th>component</th><th>metric</th><th>threshold</th>
+          <th>any</th><th>E4B</th><th>E2B</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="card"><h2>Live eval item</h2><div id="live-out" class="muted">Press "run 1 live" on a row.</div></div>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

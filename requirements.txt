@@ -1,0 +1,15 @@
+# Pinned and verified on Apple M4 / macOS 27.0.1 / Python 3.13.3 (2026-10-26).
+# Inference is NOT a Python package: llama.cpp b11669 is installed by scripts/setup.sh.
+numpy==2.5.4
+httpx==0.28.1
+sounddevice==0.5.6      # mic capture (bundles PortAudio on macOS)
+soundfile==0.14.0       # read/write WAV
+onnxruntime==1.31.1     # runs the Silero VAD model (no torch needed)
+mss==10.2.0             # screen capture
+pillow==13.0.0          # image resize / encode
+pynput==1.8.2           # global hotkey
+jsonschema==4.26.0      # validate tool-call arguments
+psutil==7.2.2           # memory measurement
+jiwer==4.0.0            # word error rate
+fastapi==0.162.0        # dashboard backend
+uvicorn==0.54.0         # dashboard server
