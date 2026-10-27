@@ -86,6 +86,11 @@ const renderers = {
   },
   "senses.audio": drawTimeline,
   "senses.screen": (e) => { $("#last-screen").src = "/media?path=" + encodeURIComponent(e.path); },
+  "senses.video": (e) => {
+    if (e.state === "recording") { $("#video-info").textContent = `Recording ${e.seconds} s of screen...`; return; }
+    $("#last-video").src = "/media?path=" + encodeURIComponent(e.path);
+    $("#video-info").textContent = `${e.seconds.toFixed(1)} s at ${e.width}x${e.height}`;
+  },
   "senses.screen.warning": (e) => { $("#screen-warning").textContent = e.message; },
   "brain.budget": (e) => renderBudget(e),
   "brain.request": (e) => { $("#last-request").textContent = json(e.body); },
@@ -161,6 +166,8 @@ const sendFile = (url) => (e) => busy(e.target.parentElement, () => api(url, e.t
 $("#wav-file").onchange = sendFile("/api/task1/file");
 $("#wav-file2").onchange = sendFile("/api/task1/file");
 $("#img-file").onchange = sendFile("/api/task2/file");
+$("#video-file").onchange = sendFile("/api/task2/video_file");
+$("#watch-btn").onclick = (e) => busy(e.target, () => api("/api/task2/watch", { seconds: 10 }));
 $("#look-btn").onclick = (e) => busy(e.target, () => api("/api/task2", {}));
 $("#look-btn2").onclick = (e) => busy(e.target, () => api("/api/task2", {}));
 
@@ -170,7 +177,9 @@ function renderTask1(e) {
     `<span class="muted">${e.chunks.length} chunk(s) · JSON attempts: ${e.attempts} · saved to memory</span>`;
 }
 function renderTask2(e) {
-  $("#task2-out").innerHTML = `<img src="/media?path=${encodeURIComponent(e.screenshot)}">\n<b>What I see</b>\n${esc(e.what_i_see)}` +
+  const media = e.video ? `<video controls muted src="/media?path=${encodeURIComponent(e.video)}"></video>`
+    : `<img src="/media?path=${encodeURIComponent(e.screenshot)}">`;
+  $("#task2-out").innerHTML = `${media}\n<b>What I see</b>\n${esc(e.what_i_see)}` +
     `\n\n<b>Problem</b>\n${esc(e.problem ?? "none")}\n\n<b>Suggested fix</b>\n${esc(e.suggested_fix ?? "-")}`;
 }
 
@@ -227,7 +236,8 @@ $("#score-refresh").onclick = refreshScorecard;
 window.runLive = (component, button) => busy(button, async () => {
   const recs = await api("/api/evals/live", { component, n: 1 });
   const media = recs.map((r) => (r.image ? `<img src="/media?path=${encodeURIComponent(r.image)}">` : "") +
-    (r.audio ? `<audio controls src="/media?path=${encodeURIComponent(r.audio)}"></audio>` : "")).join("");
+    (r.audio ? `<audio controls src="/media?path=${encodeURIComponent(r.audio)}"></audio>` : "") +
+    (r.video ? `<video controls muted src="/media?path=${encodeURIComponent(r.video)}"></video>` : "")).join("");
   $("#live-out").innerHTML = `<b>${component}</b>${media}<pre>${esc(json(recs))}</pre>`;
 });
 

@@ -136,6 +136,12 @@ Take 10 screenshots:
 - 2 subtle ones: a warning (not an error), or the error is small in a busy window
 - 2 with **no** problem: a normal editor, a calendar (`{"has_problem": false, "must_mention": []}`)
 
+Optional: add 3 to 5 short **screen recordings** (`shot11.mov`, 5 to 20 s, made with
+`Cmd+Shift+5` or `python cli.py look --watch 10`, which keeps a copy in `data/runtime/captures/`)
+with the same kind of `.json`. Pick moments a single screenshot would miss: an error that flashes
+and disappears, or a problem that only makes sense from what happened before. The scorecard then
+shows `correct_rate_image` and `correct_rate_video` separately.
+
 `must_mention` is a list of groups. A correct answer must contain at least one phrase from **every**
 group (case does not matter). Group 1 usually names the problem and group 2 the fix. Keep phrases
 short, and list the alternatives you would accept.

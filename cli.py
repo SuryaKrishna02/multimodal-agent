@@ -5,6 +5,7 @@
     python cli.py note                        Task 1: record a voice note (Enter to stop)
     python cli.py note --file note.wav        Task 1 from a file
     python cli.py look                        Task 2: screenshot now -> explanation + fix
+    python cli.py look --watch 10             Task 2 on a 10 s screen recording (needs ffmpeg)
     python cli.py chat "what did I say about Priya?"
     python cli.py record-clip data/gold/asr/clip01.wav     record a gold clip from the mic
     python cli.py record-screen demo1 --seconds 60          record frames for the screen eval
@@ -73,9 +74,15 @@ def cmd_look(a):
     from PIL import Image
 
     from agent import tasks
+    from agent.senses import video
     start_servers()
-    r = tasks.screen_help(Image.open(a.image).convert("RGB") if a.image else None)
-    show({k: r[k] for k in ("what_i_see", "problem", "suggested_fix", "screenshot")})
+    if a.watch:
+        r = tasks.watch_and_help(a.watch)
+    elif a.video:
+        r = tasks.screen_help(video_path=video.shrink(Path(a.video)))
+    else:
+        r = tasks.screen_help(Image.open(a.image).convert("RGB") if a.image else None)
+    show({k: v for k, v in r.items() if k != "tokens"})
 
 
 def cmd_chat(a):
@@ -136,7 +143,9 @@ def main():
     p.add_argument("--file")
     p.set_defaults(fn=cmd_note)
     p = sub.add_parser("look")
-    p.add_argument("--image")
+    p.add_argument("--image", help="explain this screenshot instead of the live screen")
+    p.add_argument("--video", help="explain this screen recording (any format ffmpeg reads)")
+    p.add_argument("--watch", type=float, metavar="SECONDS", help="record the screen this long, then explain")
     p.set_defaults(fn=cmd_look)
     p = sub.add_parser("chat")
     p.add_argument("text")

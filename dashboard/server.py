@@ -4,6 +4,7 @@
 """
 import io
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from PIL import Image
 
 from agent import brain, config, events, hotkey, serving, tasks, tools
 from agent.memory import episodic
-from agent.senses import audio, screen
+from agent.senses import audio, screen, video
 from evals import common as evals_common
 
 state = {"tier": config.TIER, "history": [], "mic": None}
@@ -141,6 +142,19 @@ async def task2_file(request: Request):
     img = Image.open(io.BytesIO(await request.body())).convert("RGB")
     img.thumbnail((config.SCREEN_MAX_SIDE, config.SCREEN_MAX_SIDE))
     return await run_in_threadpool(lambda: tasks.screen_help(img))
+
+
+@app.post("/api/task2/watch")
+def task2_watch(body: dict):
+    return tasks.watch_and_help(float(body.get("seconds", 10)))
+
+
+@app.post("/api/task2/video_file")
+async def task2_video_file(request: Request):
+    video.CAPTURES.mkdir(parents=True, exist_ok=True)
+    raw = video.CAPTURES / f"upload-{time.strftime('%Y%m%d-%H%M%S')}.bin"
+    raw.write_bytes(await request.body())
+    return await run_in_threadpool(lambda: tasks.screen_help(video_path=video.shrink(raw)))
 
 
 @app.get("/media")

@@ -66,6 +66,9 @@
         <div class="row"><button id="look-btn2">Capture + help (Task 2)</button></div>
         <div id="screen-warning" class="warn"></div>
         <img id="last-screen" alt=""></div>
+      <div class="card"><h2>Seeing over time: last screen video</h2>
+        <div id="video-info" class="muted">No video yet. One input_video part; llama-server samples it at 1 fps with ffmpeg.</div>
+        <video id="last-video" controls muted></video></div>
     </div>
 
     <div class="panel" id="panel-brain">
@@ -100,7 +103,9 @@
         <div id="task1-out" class="result"></div></div>
       <div class="card"><h2>Task 2: look at my screen and help</h2>
         <div class="row"><button id="look-btn">Capture screen now</button>
-          <label class="file">Use screenshot<input type="file" id="img-file" accept="image/*"></label></div>
+          <label class="file">Use screenshot<input type="file" id="img-file" accept="image/*"></label>
+          <button id="watch-btn">Record 10 s video + help</button>
+          <label class="file">Use video<input type="file" id="video-file" accept="video/*"></label></div>
         <div id="task2-out" class="result"></div></div>
     </div>
 

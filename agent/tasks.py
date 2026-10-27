@@ -1,11 +1,11 @@
 """The two Session 1 tasks, built only from the components above.
 
 Task 1  voice note -> chunks -> action items (JSON) -> memory
-Task 2  hotkey -> screenshot -> explanation + fix (JSON) -> memory
+Task 2  hotkey -> screenshot (or a short screen video) -> explanation + fix (JSON) -> memory
 """
 from agent import brain, events
 from agent.memory import episodic
-from agent.senses import audio, screen
+from agent.senses import audio, screen, video
 
 ACTION_SCHEMA = {
     "type": "object",
@@ -38,6 +38,10 @@ SCREEN_PROMPT = """This is a screenshot of my screen. Describe briefly what you 
 If there is an error or problem, name it exactly and suggest a concrete fix.
 If there is no problem, set problem and suggested_fix to null."""
 
+VIDEO_PROMPT = """This is a recording of my screen, with timestamps. Describe briefly what happened.
+If an error or problem appeared, name it exactly, say when, and suggest a concrete fix.
+If there is no problem, set problem and suggested_fix to null."""
+
 
 def voice_note(samples, store: bool = True) -> dict:
     vad = audio.VAD()
@@ -58,10 +62,14 @@ def voice_note(samples, store: bool = True) -> dict:
     return result
 
 
-def screen_help(img=None, store: bool = True) -> dict:
-    img = img or screen.capture()
-    path = screen.save(img)
-    data, info = brain.ask_json([brain.part("image", img), brain.part("text", SCREEN_PROMPT)], SCREEN_SCHEMA)
+def screen_help(img=None, store: bool = True, video_path=None) -> dict:
+    """Explain the screen. Pass video_path to send a screen recording instead of one screenshot."""
+    if video_path:
+        path, parts = video_path, [brain.part("video", video_path), brain.part("text", VIDEO_PROMPT)]
+    else:
+        img = img or screen.capture()
+        path, parts = screen.save(img), [brain.part("image", img), brain.part("text", SCREEN_PROMPT)]
+    data, info = brain.ask_json(parts, SCREEN_SCHEMA)
     data = data or {"what_i_see": "", "problem": None, "suggested_fix": None}
     for k in ("problem", "suggested_fix"):     # small models often write "None" instead of null
         if str(data[k]).strip().lower() in ("", "none", "null", "n/a", "no problem"):
@@ -70,7 +78,13 @@ def screen_help(img=None, store: bool = True) -> dict:
         summary = data["what_i_see"]
         if data["problem"]:
             summary += f" Problem: {data['problem']}. Fix: {data['suggested_fix']}"
-        episodic.store(summary, kind="screen_help", media=str(path))
-    result = {**data, "screenshot": str(path), **info}
+        episodic.store(summary, kind="screen_video" if video_path else "screen_help", media=str(path))
+    media_key = "video" if video_path else "screenshot"
+    result = {**data, media_key: str(path), **info}
     events.emit("task2.done", **{k: v for k, v in result.items() if k != "tokens"})
     return result
+
+
+def watch_and_help(seconds: float = 10, store: bool = True) -> dict:
+    """Task 2 over time: record the screen for a few seconds, then explain what happened."""
+    return screen_help(video_path=video.record(seconds), store=store)

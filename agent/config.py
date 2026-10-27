@@ -44,7 +44,12 @@ SCREEN_MAX_SIDE = 1280                 # downscale screenshots before sending
 SCREEN_SAMPLE_EVERY_S = 1.0            # sampler: how often to look
 SCREEN_CHANGE_THRESHOLD = 0.005        # sampler: share of pixels that must change (2 new lines of
                                        # terminal text = ~1%; a blinking cursor = ~0.01%)
-IMAGE_TOKENS_ESTIMATE = 280            # Gemma 4 default vision budget per image
+IMAGE_PIXELS_PER_TOKEN = 2304          # measured: Gemma 4 spends ~1 token per 48x48 pixels...
+IMAGE_MAX_TOKENS = 1120                # ...up to this cap (1280x720 = ~400 tokens, Retina = 1,120)
+
+VIDEO_FPS = 1.0                        # frames llama-server takes per second (its default is 4)
+VIDEO_MAX_SIDE = 640                   # shrink video frames: ~110 tokens each instead of ~400
+VIDEO_MAX_S = 60                       # Gemma 4 guidance: up to 60 s of video at 1 fps
 
 # --- Brain -------------------------------------------------------------------
 MAX_OUTPUT_TOKENS = 1024

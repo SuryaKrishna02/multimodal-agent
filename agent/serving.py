@@ -83,9 +83,12 @@ class LlamaServer:
 
 
 def llm_server(tier: str | None = None) -> LlamaServer:
+    from agent.senses import video
     t = config.TIERS[tier or config.TIER]
-    return LlamaServer("llm", t["model"], t["mmproj"], config.LLM_PORT,
-                       ["-c", str(config.LLM_CTX), "-np", "1", "--metrics"])
+    extra = ["-c", str(config.LLM_CTX), "-np", "1", "--metrics", "--video-fps", str(config.VIDEO_FPS)]
+    if video.ffmpeg_dir():                   # llama-server decodes video with ffmpeg + ffprobe
+        extra += ["--video-ffmpeg-dir", video.ffmpeg_dir()]
+    return LlamaServer("llm", t["model"], t["mmproj"], config.LLM_PORT, extra)
 
 
 def embed_server() -> LlamaServer:

@@ -16,6 +16,7 @@ from PIL import Image
 
 from agent import config, events, serving, tools
 from agent.senses import audio as audio_sense
+from agent.senses import video as video_sense
 
 SYSTEM = """You are a private assistant running fully on this Mac. You can hear short voice clips,
 see screenshots and use tools. Be brief and concrete. Use a tool only when it helps.
@@ -31,7 +32,11 @@ def system_prompt() -> str:
 # --- 1. Assemble ---------------------------------------------------------------
 
 def part(kind: str, value) -> dict:
-    """One content part. kind: "text" (str), "image" (PIL image or path), "audio" (16 kHz float32 array)."""
+    """One content part.
+
+    kind: "text" (str), "image" (PIL image or path), "audio" (16 kHz float32 array), "video" (file path).
+    Keys starting with "_" are notes for the token budget; send() strips them.
+    """
     if kind == "text":
         return {"type": "text", "text": value}
     if kind == "image":
@@ -39,21 +44,32 @@ def part(kind: str, value) -> dict:
         buf = io.BytesIO()
         img.convert("RGB").save(buf, "PNG")
         return {"type": "image_url", "image_url": {"url": "data:image/png;base64," +
-                                                   base64.b64encode(buf.getvalue()).decode()}}
+                                                   base64.b64encode(buf.getvalue()).decode()},
+                "_size": img.size}
     if kind == "audio":
         data = base64.b64encode(audio_sense.to_wav_bytes(value)).decode()
         return {"type": "input_audio", "input_audio": {"data": data, "format": "wav"},
                 "_seconds": round(len(value) / config.SAMPLE_RATE, 1)}
+    if kind == "video":
+        info = video_sense.probe(value)
+        return {"type": "input_video", "input_video": {"data": base64.b64encode(open(value, "rb").read()).decode()},
+                "_size": (info["width"], info["height"]), "_seconds": info["seconds"]}
     raise ValueError(kind)
 
 
 # --- 2. Context budget ---------------------------------------------------------
 
+def image_tokens(size: tuple[int, int]) -> int:
+    return min(config.IMAGE_MAX_TOKENS, size[0] * size[1] // config.IMAGE_PIXELS_PER_TOKEN)
+
+
 def estimate_tokens(p: dict) -> int:
     if p["type"] == "text":
         return len(p["text"]) // 4 + 1               # rough rule: ~4 characters per token
     if p["type"] == "image_url":
-        return config.IMAGE_TOKENS_ESTIMATE
+        return image_tokens(p.get("_size", (1280, 720)))
+    if p["type"] == "input_video":                   # one image per sampled frame
+        return int(p["_seconds"] * config.VIDEO_FPS + 1) * image_tokens(p["_size"])
     return int(p.get("_seconds", 30) * config.AUDIO_TOKENS_PER_S)
 
 
@@ -105,7 +121,7 @@ def _elide_media(body: dict) -> dict:
     body = copy.deepcopy(body)
     for m in body["messages"]:
         for p in m["content"] if isinstance(m.get("content"), list) else []:
-            for key in ("image_url", "input_audio"):
+            for key in ("image_url", "input_audio", "input_video"):
                 if key in p:
                     field = "url" if key == "image_url" else "data"
                     p[key][field] = p[key][field][:48] + f"...<{len(p[key][field]):,} chars>"

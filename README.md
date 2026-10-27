@@ -4,7 +4,7 @@ A teaching harness for a personal agent that **listens, sees, remembers and acts
 with open models. Built for a three-part coding series by the Multimodal AI Group at Cohere Labs Open Science.
 
 - Inference: [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` (pinned build b11669) on Apple Metal
-- Model: Gemma 4 **E4B** (default) or **E2B**: text, image and audio in, text out
+- Model: Gemma 4 **E4B** (default) or **E2B**: text, image, audio and screen video in, text out
 - Memory search: EmbeddingGemma-2 (text, image and audio in one vector space)
 - Everything else is plain Python you can read in one sitting
 
@@ -29,6 +29,7 @@ agent/
   serving.py         llama-server lifecycle + client                      (segment 1)
   senses/audio.py    mic, Silero VAD, chunks under 30 s                   (segment 2)
   senses/screen.py   screen capture + change-based sampling               (segment 2)
+  senses/video.py    screen recording -> one video part (ffmpeg)          (segment 2)
   brain.py           request assembly, context budget, JSON, tool loop    (segment 3)
   memory/episodic.py SQLite log + embedding search + junk filter          (segment 4)
   tools/             registry, permission tiers, guards, built-in tools   (segment 5)

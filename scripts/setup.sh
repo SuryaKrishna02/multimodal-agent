@@ -55,5 +55,9 @@ fetch https://raw.githubusercontent.com/snakers4/silero-vad/$SILERO_TAG/src/sile
 if [[ ! -d .venv ]]; then python3 -m venv .venv; fi
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements.lock
+# 5. ffmpeg: llama-server calls ffmpeg + ffprobe to decode video input (optional)
+if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+  echo "NOTE: ffmpeg not found. Video input is disabled until you run:  brew install ffmpeg"
+fi
 echo
 echo "Setup done. Next:  .venv/bin/python scripts/smoke_test.py"

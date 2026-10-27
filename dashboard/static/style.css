@@ -70,7 +70,7 @@ th { color: var(--muted); font-weight: 600; }
 #scorecard td { border-bottom: 0; }
 #scorecard tr.group td { border-top: 1px solid var(--line); }
 #timeline { width: 100%; height: 90px; background: var(--bg); border-radius: 8px; }
-#last-screen, .result img { max-width: 100%; max-height: 360px; border-radius: 8px; border: 1px solid var(--line); }
+#last-screen, #last-video, .result img, .result video { max-width: 100%; max-height: 360px; border-radius: 8px; border: 1px solid var(--line); }
 .result { white-space: pre-wrap; }
 .result li { margin: 3px 0; }
 .bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--bg); margin: 6px 0; }

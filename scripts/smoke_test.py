@@ -3,8 +3,8 @@
     .venv/bin/python scripts/smoke_test.py            # default tier (E4B)
     .venv/bin/python scripts/smoke_test.py --tier e2b
 
-Makes its own inputs (a rendered error screenshot, and speech from macOS `say`),
-so it runs anywhere, anytime. Exit code 0 means every check passed.
+Makes its own inputs (a rendered error screenshot, a 4 s screen video made from rendered
+frames, and speech from macOS `say`), so it runs anywhere, anytime. Exit code 0 means every check passed.
 It checks that each path WORKS, not how accurate it is: that is what evals/ is for.
 """
 import argparse
@@ -19,8 +19,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
 from agent import config, serving  # noqa: E402
+from agent.senses import video  # noqa: E402
 
 SPOKEN = "Please buy oat milk and call the plumber on Monday."
+
+
+def make_video(tmp: Path, font) -> Path:
+    """4 s at 4 fps: a prompt, then a DiskFullError appears at 2 s."""
+    for n in range(16):
+        img = Image.new("RGB", (640, 360), (30, 30, 30))
+        text = "$ ./backup.sh" + ("\nDiskFullError: no space left on device" if n >= 8 else "")
+        ImageDraw.Draw(img).text((20, 20), text, fill="white", font=font)
+        img.save(tmp / f"f{n:02d}.png")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", "4", "-i", str(tmp / "f%02d.png"),
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(tmp / "screen.mp4")], check=True)
+    return tmp / "screen.mp4"
 
 
 def make_inputs(tmp: Path) -> tuple[Path, Path]:
@@ -77,6 +90,13 @@ def main() -> int:
                   tools=[{"type": "function", "function": {"name": "get_time", "description": "Current local time",
                                                            "parameters": {"type": "object", "properties": {}}}}]),
         ]
+        if video.ffmpeg_dir():
+            mp4 = make_video(Path(d), ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", 22))
+            results.append(check("video", [{"type": "input_video", "input_video": {"data": b64(mp4)}},
+                                           {"type": "text", "text": "What error appears in this screen recording?"}],
+                                 ["DiskFullError"]))
+        else:
+            print("SKIP  video  ffmpeg/ffprobe not found (brew install ffmpeg)")
     print(f"llama-server resident memory: {server.rss_gb():.1f} GB")
     if started_here:
         server.stop()

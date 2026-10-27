@@ -12,6 +12,7 @@ Run the whole agent on your own Mac. Everything stays on your machine: the model
 | Disk | about 11 GB (both model tiers + embedding model) |
 | Python | 3.10 or newer (tested with 3.13.3) |
 | Tools | `curl`, `shasum`, `tar` (built into macOS) |
+| Optional | `ffmpeg` for screen-video input: `brew install ffmpeg` (tested with 9.0.2) |
 
 Not supported: Linux, Windows, Intel Macs, NVIDIA, Colab.
 
@@ -44,7 +45,7 @@ Grant these to the app you run the agent from (Terminal, iTerm, VS Code...) in
 | Permission | Needed for | Symptom when missing |
 |---|---|---|
 | Microphone | recording voice notes | silent recordings |
-| Screen Recording | Task 2, screen evals | blank screenshots; the dashboard shows a warning |
+| Screen Recording | Task 2, screen videos, screen evals | blank screenshots; the dashboard shows a warning |
 | Accessibility + Input Monitoring | the global hotkey (Ctrl+Option+Space) | the hotkey does nothing; warning in the event log |
 
 ## Run
@@ -62,6 +63,7 @@ Without the dashboard:
 ```bash
 .venv/bin/python cli.py note                     # Task 1: speak, press Enter, get action items
 .venv/bin/python cli.py look                     # Task 2: explain the current screen
+.venv/bin/python cli.py look --watch 10          # Task 2 on a 10 s screen recording (needs ffmpeg)
 .venv/bin/python cli.py chat "what do I need to do tomorrow?"
 .venv/bin/python cli.py memory                   # list memories
 .venv/bin/python cli.py stop                     # stop the model servers

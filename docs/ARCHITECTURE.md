@@ -14,10 +14,11 @@ flowchart LR
   subgraph SENSES["2 · Senses  agent/senses/"]
     AUD["audio.py<br/>capture → Silero VAD → chunks &lt; 30 s"]
     SCN["screen.py<br/>capture → downscale → change sampler"]
+    VID["video.py<br/>record → shrink to 640 px → one video part"]
   end
 
   subgraph BRAIN["3 · Brain  agent/brain.py"]
-    ASM["assemble<br/>interleave text · image · audio"]
+    ASM["assemble<br/>interleave text · image · audio · video"]
     BUD["context budget"]
     OUT["structured output<br/>JSON schema → grammar"]
     TC["tool loop<br/>validate · retry"]
@@ -45,6 +46,7 @@ flowchart LR
 
   MIC --> AUD --> ASM
   SCR --> SCN --> ASM
+  SCR --> VID --> ASM
   KEY --> T1 & T2
   T1 --> AUD
   T2 --> SCN
@@ -65,7 +67,7 @@ flowchart LR
 |---|---|---|
 | 0 Harness map, eval pattern | this file, `evals/common.py` | n/a |
 | 1 Serving | `agent/config.py`, `agent/serving.py` | `serving` |
-| 2 Senses | `agent/senses/audio.py`, `agent/senses/screen.py` | `vad`, `asr`, `screen` |
+| 2 Senses | `agent/senses/audio.py`, `agent/senses/screen.py`, `agent/senses/video.py` | `vad`, `asr`, `screen` |
 | 3 Brain | `agent/brain.py` | `structured`, `tool_calls` |
 | 4 Memory v1 | `agent/memory/episodic.py` | `memory` |
 | 5 Tools, CLI, hotkey | `agent/tools/`, `cli.py`, `agent/hotkey.py` | `tools` |
@@ -77,10 +79,11 @@ Cross-cutting: `agent/events.py` (every component logs here, and the dashboard s
 
 ## Data flow for one request
 
-1. A sense produces raw input: a 16 kHz float array or a PIL image.
-2. `brain.part()` turns it into an OpenAI-style content part (base64 WAV or PNG).
+1. A sense produces raw input: a 16 kHz float array, a PIL image or a video file.
+2. `brain.part()` turns it into an OpenAI-style content part (base64 WAV, PNG or MP4).
 3. `brain.fit_budget()` adds the system prompt and the top 3 memories, estimates tokens
-   (audio 25/s, image ~280, text ~chars/4) and drops old history if it does not fit.
+   (audio 25/s; image = pixels / 2304, max 1,120; video = frames x image; text ~chars/4)
+   and drops old history if it does not fit.
 4. `brain.send()` writes the exact request to `data/runtime/last_request.json`, logs it to the
    event log (the dashboard's Brain tab), and posts it to llama-server.
 5. A reply with `tool_calls` goes through `tools.run()`: schema check → tier → guard → execute.

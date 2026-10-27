@@ -12,6 +12,7 @@ What was checked before building Session 1, on the target machine: Apple M4, 24 
 | Embeddings | `embeddinggemma-2-Q8_0.gguf` + `mmproj-embeddinggemma-2-Q8_0.gguf` | `ggml-org/embeddinggemma-2-GGUF` @ `58faf90` |
 | Silero VAD | `silero_vad.onnx` | `snakers4/silero-vad` tag v6.2.3 |
 | Python | 3.13.3, packages in `requirements.lock` | |
+| ffmpeg + ffprobe | 9.0.2 (optional, for video) | Homebrew `brew install ffmpeg` |
 
 All checksums are in `scripts/setup.sh`. The Q4_0 weights are converted from Google's QAT checkpoints
 (`google/gemma-4-E4B-it-qat-q4_0-unquantized`), so Q4_0 is the intended quantization, not a shortcut.
@@ -31,7 +32,7 @@ All checksums are in `scripts/setup.sh`. The Q4_0 weights are converted from Goo
 |---|---|
 | Audio clips max 30 s | Confirmed. llama.cpp **splits longer clips every 30 s itself** (`tools/mtmd/mtmd-audio.cpp`, Gemma 4 preprocessor), even mid-word. A 35 s clip was fully transcribed, so there is no hard error. We still chunk at pauses, under 28 s. |
 | ~25 tokens/s of audio | Confirmed: a 35.5 s clip used 906 prompt tokens, about 25/s plus the text. |
-| Video not supported in llama.cpp | **Partly outdated**: b11669 reports `video: true` for Gemma 4 and the docs list video input. Out of scope here, but worth a sentence in the talk. |
+| Video not supported in llama.cpp | **Outdated**: b11669 accepts `input_video` for Gemma 4, so the harness now supports it (see "Video input" below). |
 | Function calling is weak | Simple cases work on both tiers. Found a real quirk: **with thinking off, the reply after a tool result is empty** (same as ollama/ollama#19044). Fix in `brain.respond()`: thinking on for that one step. |
 | Measure peak memory | E4B server 4–7 GB resident (varies with paging of memory-mapped weights), E2B ~3.8 GB, embeddings ~1 GB. System total during evals with the dashboard and Chrome open: ~12–14.6 GB of 24 GB. |
 
@@ -48,7 +49,32 @@ The base M4 GPU is the limit for prompt processing: Metal is ~3x faster than CPU
 larger micro-batches did not help. So a 30 s clip plus a screenshot (~1.1k tokens) costs ~4 s before the
 first word on E4B. Keep the system prompt stable so llama.cpp can reuse its cached prefix.
 
-## Other things found while building (each is a good teaching moment)
+## Video input (added after Session 1 was first committed)
+
+One `{"type": "input_video", "input_video": {"data": <base64 mp4/mov>}}` part. What happens inside
+llama-server (`tools/mtmd/mtmd-helper.cpp`): it runs **ffmpeg + ffprobe** (from PATH or
+`--video-ffmpeg-dir`) to take `--video-fps` frames per second (default 4; we use 1), adds a text
+timestamp every 5 s, and sends every frame to Gemma 4 as an ordinary image. There is no
+Gemma-specific video encoder, and the **audio track is ignored**. Google's guidance for Gemma 4:
+up to 60 s at 1 fps, with low per-frame budgets.
+
+Measured on a 12 s synthetic screen recording (traceback at 5 s, dialog at 9 s). Every run named
+both events correctly:
+
+| Tier | fps | Frame size | Prompt tokens | Time |
+|---|---|---|---|---|
+| E4B | 1 | 1280x720 | 4,954 | 31.5 s |
+| E4B | 1 | 960x540 | 2,734 | 17.4 s |
+| E4B | 1 | **640x360** | **1,342** | **9.3 s** |
+| E4B | 4 | 640x360 | 5,159 | 33.6 s |
+| E2B | 1 | 640x360 | 1,343 | 5.7 s |
+| E2B | 1 | 2940x1912 (Retina, native) | 3,255 for 3 s | 21.3 s |
+
+Cost per frame follows the same rule as images: about **1 token per 48x48 pixels, capped at 1,120**.
+So the harness records with macOS `screencapture -v`, shrinks to 640 px wide with ffmpeg, and runs
+the server at 1 fps. Smaller frames lose some fine terminal text: test on your own recordings.
+
+ (each is a good teaching moment)
 
 - **Thinking is on by default** in Gemma 4. With a 300-token limit, structured output and tool calls came
   back empty because the thinking used up the budget. `config.THINKING = False` by default.
