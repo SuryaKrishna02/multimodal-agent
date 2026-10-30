@@ -5,6 +5,7 @@ search() - embed the query -> cosine similarity against every row -> top k
 
 Brute-force search over a numpy matrix is fine for thousands of memories.
 """
+
 import json
 import sqlite3
 import time
@@ -24,11 +25,11 @@ def _db() -> sqlite3.Connection:
     return db
 
 
-def _doc(kind: str, text: str) -> str:      # EmbeddingGemma document format
+def _doc(kind: str, text: str) -> str:  # EmbeddingGemma document format
     return f"title: {kind} | text: {text}"
 
 
-def _query(text: str) -> str:               # EmbeddingGemma query format
+def _query(text: str) -> str:  # EmbeddingGemma query format
     return f"task: search result | query: {text}"
 
 
@@ -51,18 +52,29 @@ def store(text: str, kind: str = "note", meta: dict | None = None, media: str | 
         events.emit("memory.rejected", text=text, mem_kind=kind, reason=reason)
         return None
     with _db() as db:
-        cur = db.execute("INSERT INTO memories (ts, kind, text, meta, media, embedding) VALUES (?,?,?,?,?,?)",
-                         (time.time(), kind, text, json.dumps(meta or {}), media, vec.tobytes()))
+        cur = db.execute(
+            "INSERT INTO memories (ts, kind, text, meta, media, embedding) VALUES (?,?,?,?,?,?)",
+            (time.time(), kind, text, json.dumps(meta or {}), media, vec.tobytes()),
+        )
     events.emit("memory.stored", id=cur.lastrowid, text=text, mem_kind=kind)
     return cur.lastrowid
 
 
 def search(query: str, k: int = config.MEMORY_TOP_K) -> list[dict]:
+    """Find the memories closest to a query.
+
+    Args:
+        query (str): Text to search for.
+        k (int, optional): Number of memories to return. Defaults to `config.MEMORY_TOP_K`.
+
+    Returns:
+        list[dict]: Memories, best first, each with a `score` (cosine similarity).
+    """
     ids, matrix = _matrix()
     if not ids:
         return []
     q = np.array(serving.embed([_query(query)])[0], np.float32)
-    scores = matrix @ q                       # vectors are unit length, so dot product = cosine
+    scores = matrix @ q  # vectors are unit length, so dot product = cosine
     top = np.argsort(-scores)[:k]
     rows = {r["id"]: r for r in all_memories(ids=[ids[i] for i in top])}
     hits = [{**rows[ids[i]], "score": round(float(scores[i]), 3)} for i in top]
@@ -71,18 +83,37 @@ def search(query: str, k: int = config.MEMORY_TOP_K) -> list[dict]:
 
 
 def all_memories(limit: int = 200, ids: list[int] | None = None) -> list[dict]:
+    """Read memories from the database.
+
+    Args:
+        limit (int, optional): Maximum number of rows when `ids` is None, newest first. Defaults to 200.
+        ids (list[int], optional): Return exactly these memories instead. Defaults to None.
+
+    Returns:
+        list[dict]: Memories with `id`, `ts`, `when`, `kind`, `text`, `meta` and `media`.
+    """
     with _db() as db:
         if ids is not None:
             marks = ",".join("?" * len(ids))
             rows = db.execute(f"SELECT id, ts, kind, text, meta, media FROM memories WHERE id IN ({marks})", ids)
         else:
-            rows = db.execute("SELECT id, ts, kind, text, meta, media FROM memories ORDER BY id DESC LIMIT ?",
-                              (limit,))
-        return [{"id": i, "ts": ts, "when": time.strftime("%a %H:%M", time.localtime(ts)), "kind": kind,
-                 "text": text, "meta": json.loads(meta), "media": media} for i, ts, kind, text, meta, media in rows]
+            rows = db.execute("SELECT id, ts, kind, text, meta, media FROM memories ORDER BY id DESC LIMIT ?", (limit,))
+        return [
+            {
+                "id": i,
+                "ts": ts,
+                "when": time.strftime("%a %H:%M", time.localtime(ts)),
+                "kind": kind,
+                "text": text,
+                "meta": json.loads(meta),
+                "media": media,
+            }
+            for i, ts, kind, text, meta, media in rows
+        ]
 
 
 def clear() -> None:
+    """Delete every memory."""
     with _db() as db:
         db.execute("DELETE FROM memories")
     events.emit("memory.cleared")

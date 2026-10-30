@@ -7,11 +7,19 @@
     python cli.py look                        Task 2: screenshot now -> explanation + fix
     python cli.py look --watch 10             Task 2 on a 10 s screen recording (needs ffmpeg)
     python cli.py chat "what did I say about Priya?"
-    python cli.py record-clip data/gold/asr/clip01.wav     record a gold clip from the mic
-    python cli.py record-screen demo1 --seconds 60          record frames for the screen eval
-    python cli.py evals --run                 same as python evals/run_all.py --run
+    python cli.py record-clip clip.wav        record a clip from the mic (then: evals add asr clip.wav --text "...")
+    python cli.py record-screen demo1         record frames for the screen eval (then: evals add screen demo1 --moment ...)
+    python cli.py evals --run                 run every eval on the synthetic and your own cases
+    python cli.py evals status                how many cases each eval has
+    python cli.py evals add -h                add your own eval case
+    python cli.py doctor [--exercise]         which OS + accelerator plug-ins were detected, and do they work
+
+Everything OS- or GPU-specific lives in agent/platforms/ and agent/accel/. Commands here call
+those plug-ins and never branch on the OS. Force a choice with AGENT_PLATFORM=<name> / AGENT_ACCEL=<name>.
 """
+
 import argparse
+import contextlib
 import json
 import subprocess
 import sys
@@ -21,6 +29,12 @@ from agent import config, serving
 
 
 def start_servers(llm=True, embed=True):
+    """Start the model servers.
+
+    Args:
+        llm (bool, optional): Start the language model server. Defaults to True.
+        embed (bool, optional): Start the embedding server. Defaults to True.
+    """
     if llm:
         serving.llm_server().start()
     if embed:
@@ -28,33 +42,50 @@ def start_servers(llm=True, embed=True):
 
 
 def show(obj):
+    """Print an object as indented JSON.
+
+    Args:
+        obj: Any JSON-serializable object. Other values print as strings.
+    """
     print(json.dumps(obj, indent=1, default=str))
 
 
 def cmd_serve(a):
+    """`serve`: start both servers and keep them up until Enter or Ctrl-C.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments, not used.
+    """
     start_servers()
     print(f"llm ({config.TIER}) on :{config.LLM_PORT}, embeddings on :{config.EMBED_PORT}. Ctrl-C stops both.")
-    try:
+    with contextlib.suppress(KeyboardInterrupt, EOFError):
         input()
-    except (KeyboardInterrupt, EOFError):
-        pass
     serving.llm_server().stop()
     serving.embed_server().stop()
 
 
 def cmd_stop(_a):
+    """`stop`: stop both model servers."""
     serving.llm_server().stop()
     serving.embed_server().stop()
 
 
 def cmd_dashboard(_a):
+    """`dashboard`: run the web dashboard on localhost."""
     import uvicorn
+
     print(f"Dashboard: http://127.0.0.1:{config.DASHBOARD_PORT}")
     uvicorn.run("dashboard.server:app", host="127.0.0.1", port=config.DASHBOARD_PORT, log_level="warning")
 
 
 def record_until_enter():
+    """Record from the microphone until the user presses Enter.
+
+    Returns:
+        np.ndarray: 16 kHz mono float32 audio.
+    """
     from agent.senses import audio
+
     mic = audio.Mic()
     mic.start()
     input("Recording... press Enter to stop. ")
@@ -62,8 +93,14 @@ def record_until_enter():
 
 
 def cmd_note(a):
+    """`note`: Task 1 on a recording from the microphone or from `--file`.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `file`.
+    """
     from agent import tasks
     from agent.senses import audio
+
     start_servers()
     samples = audio.load_wav(a.file) if a.file else record_until_enter()
     r = tasks.voice_note(samples)
@@ -71,10 +108,16 @@ def cmd_note(a):
 
 
 def cmd_look(a):
+    """`look`: Task 2 on the live screen, an image, a video or a fresh recording.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `image`, `video` and `watch`.
+    """
     from PIL import Image
 
     from agent import tasks
     from agent.senses import video
+
     start_servers()
     if a.watch:
         r = tasks.watch_and_help(a.watch)
@@ -86,8 +129,14 @@ def cmd_look(a):
 
 
 def cmd_chat(a):
+    """`chat`: ask the agent one question, with tools and memory.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `text` and `screen`.
+    """
     from agent import brain
     from agent.senses import screen
+
     start_servers()
     parts = [brain.part("image", screen.capture())] if a.screen else []
     r = brain.respond(parts + [brain.part("text", a.text)])
@@ -97,7 +146,9 @@ def cmd_chat(a):
 
 
 def cmd_hotkey(_a):
+    """`hotkey`: run Task 2 each time the global hotkey is pressed, until Enter."""
     from agent import events, hotkey, tasks
+
     start_servers()
     hotkey.listen(lambda: show({k: v for k, v in tasks.screen_help().items() if k != "tokens"}))
     for e in events.since(0, "hotkey.warning"):
@@ -106,7 +157,13 @@ def cmd_hotkey(_a):
 
 
 def cmd_memory(a):
+    """`memory`: list, search or clear the memories.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `action` and `query`.
+    """
     from agent.memory import episodic
+
     start_servers(llm=False)
     if a.action == "clear":
         episodic.clear()
@@ -118,7 +175,13 @@ def cmd_memory(a):
 
 
 def cmd_record_clip(a):
+    """`record-clip`: record an audio clip from the microphone, to use as an eval case.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `path`.
+    """
     import soundfile as sf
+
     samples = record_until_enter()
     Path(a.path).parent.mkdir(parents=True, exist_ok=True)
     sf.write(a.path, samples, config.SAMPLE_RATE, subtype="PCM_16")
@@ -126,14 +189,22 @@ def cmd_record_clip(a):
 
 
 def cmd_record_screen(a):
+    """`record-screen`: record frames of the screen as a screen eval case.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `name`, `seconds` and `fps`.
+    """
     from agent.senses import screen
-    out = config.GOLD / "screen" / a.name
+
+    out = config.EVAL_USER / "screen" / a.name
     print(f"Recording {a.seconds:.0f} s of screen at {a.fps} fps into {out} ...")
     n = screen.record_frames(out, a.seconds, a.fps)
-    print(f"saved {n} frames. Now write {out / 'key_moments.json'} (see docs/RECORDING_GUIDE.md).")
+    print(f"saved {n} frames. Now mark when something important happens, for example:")
+    print(f'  python cli.py evals add screen {a.name} --moment 12.5 "error dialog appears"')
 
 
 def main():
+    """Parse the command line and run the chosen command."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve").set_defaults(fn=cmd_serve)
@@ -164,10 +235,15 @@ def main():
     p.add_argument("--seconds", type=float, default=60)
     p.add_argument("--fps", type=float, default=2)
     p.set_defaults(fn=cmd_record_screen)
-    sub.add_parser("smoke").set_defaults(fn=lambda a: sys.exit(subprocess.call(
-        [sys.executable, "scripts/smoke_test.py", *a.rest])))
-    sub.add_parser("evals").set_defaults(fn=lambda a: sys.exit(subprocess.call(
-        [sys.executable, "evals/run_all.py", *a.rest])))
+    sub.add_parser("smoke", add_help=False).set_defaults(
+        fn=lambda a: sys.exit(subprocess.call([sys.executable, "scripts/smoke_test.py", *a.rest]))
+    )
+    sub.add_parser("doctor", add_help=False).set_defaults(
+        fn=lambda a: sys.exit(subprocess.call([sys.executable, "scripts/doctor.py", *a.rest]))
+    )
+    sub.add_parser("evals", add_help=False).set_defaults(
+        fn=lambda a: sys.exit(subprocess.call([sys.executable, "evals/run_all.py", *a.rest]))
+    )
     a, rest = ap.parse_known_args()
     a.rest = rest
     a.fn(a)

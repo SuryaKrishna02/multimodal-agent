@@ -1,0 +1,5 @@
+# Developer tools only: lint, type check, complexity. Not needed to run the agent.
+# Versions fetched from PyPI on 2026-10-28. Install: .venv/bin/python -m pip install -r requirements/dev.txt
+ruff==0.17.3
+pyright==1.1.414
+complexipy==8.3.0

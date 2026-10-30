@@ -1,0 +1,8 @@
+{
+  "include": ["agent", "dashboard", "evals", "scripts", "tests", "cli.py"],
+  "exclude": ["**/__pycache__", ".venv", ".cache", "data"],
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "standard",
+  "venvPath": ".",
+  "venv": ".venv"
+}

@@ -3,6 +3,7 @@
 Task 1  voice note -> chunks -> action items (JSON) -> memory
 Task 2  hotkey -> screenshot (or a short screen video) -> explanation + fix (JSON) -> memory
 """
+
 from agent import brain, events
 from agent.memory import episodic
 from agent.senses import audio, screen, video
@@ -11,10 +12,14 @@ ACTION_SCHEMA = {
     "type": "object",
     "properties": {
         "transcript": {"type": "string"},
-        "action_items": {"type": "array", "items": {
-            "type": "object",
-            "properties": {"task": {"type": "string"}, "due": {"type": ["string", "null"]}},
-            "required": ["task", "due"]}},
+        "action_items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"task": {"type": "string"}, "due": {"type": ["string", "null"]}},
+                "required": ["task", "due"],
+            },
+        },
     },
     "required": ["transcript", "action_items"],
 }
@@ -44,6 +49,15 @@ If there is no problem, set problem and suggested_fix to null."""
 
 
 def voice_note(samples, store: bool = True) -> dict:
+    """Task 1: turn a voice recording into a transcript and action items.
+
+    Args:
+        samples (np.ndarray): 16 kHz mono float32 audio.
+        store (bool, optional): Save the transcript and the action items in memory. Defaults to True.
+
+    Returns:
+        dict: `transcript`, `action_items`, `chunks` as (start_s, end_s) pairs, and the info of `ask_json`.
+    """
     vad = audio.VAD()
     chunks = audio.chunk(samples, vad)
     if not chunks:
@@ -71,7 +85,7 @@ def screen_help(img=None, store: bool = True, video_path=None) -> dict:
         path, parts = screen.save(img), [brain.part("image", img), brain.part("text", SCREEN_PROMPT)]
     data, info = brain.ask_json(parts, SCREEN_SCHEMA)
     data = data or {"what_i_see": "", "problem": None, "suggested_fix": None}
-    for k in ("problem", "suggested_fix"):     # small models often write "None" instead of null
+    for k in ("problem", "suggested_fix"):  # small models often write "None" instead of null
         if str(data[k]).strip().lower() in ("", "none", "null", "n/a", "no problem"):
             data[k] = None
     if store and data["what_i_see"]:

@@ -1,0 +1,30 @@
+# Lint and format rules for the whole repo. Run: ruff check . && ruff format --check .
+# This is developer tooling only: python cli.py does not use it.
+line-length = 120
+target-version = "py313"
+extend-exclude = [".cache", "data"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "ASYNC", "S", "D"]
+# E501: `ruff format` owns line length. It does not wrap long comments and strings.
+# S603/S607: this project starts local binaries (llama-server, ffmpeg, screencapture) from argument
+# lists it builds itself. No shell string, no user input.
+ignore = ["E501", "S603", "S607"]
+
+[lint.per-file-ignores]
+# Templates import what a contributor is likely to need.
+"**/_template.py" = ["F401"]
+# Log file handle must stay open for the life of the server process.
+"agent/serving.py" = ["SIM115"]
+# `?` placeholders only; the f-string builds the marker list, not the values.
+"agent/memory/episodic.py" = ["S608"]
+# run_shell is a confirm-tier tool behind a guard. The model never runs it unapproved.
+"agent/tools/builtin.py" = ["S602"]
+# Pinned https URLs, and archives are checksum-verified before extraction.
+"scripts/setup.py" = ["S310", "S202"]
+# unittest uses assert methods, but tests may also use plain asserts and temp paths.
+"tests/**" = ["S101", "S108"]
+
+[lint.pydocstyle]
+# Every public module, class, function and method needs a Google-style docstring (rule D).
+convention = "google"

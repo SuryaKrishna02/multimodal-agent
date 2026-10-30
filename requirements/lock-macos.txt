@@ -1,5 +1,5 @@
-# Full pinned environment (direct + transitive), generated with pip freeze on 2026-10-26.
-# Direct dependencies and why: requirements.txt. Install: pip install -r requirements.lock
+# Full pinned environment for macOS (direct + transitive), generated with pip freeze on 2026-10-26.
+# Direct dependencies and why: base.txt. Installed by scripts/setup.py.
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1

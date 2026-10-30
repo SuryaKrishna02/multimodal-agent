@@ -3,6 +3,7 @@
 The dashboard polls it, so each panel can show what just happened.
 Events also go to data/runtime/events.jsonl so you can read them after a run.
 """
+
 import json
 import threading
 import time
@@ -29,11 +30,28 @@ def emit(kind: str, **data) -> dict:
 
 
 def since(after_id: int = 0, kind_prefix: str = "") -> list[dict]:
+    """Return the events that match a prefix and are newer than an id.
+
+    Args:
+        after_id (int, optional): Return only events with a larger id. Defaults to 0.
+        kind_prefix (str, optional): Return only kinds that start with this text. Defaults to "".
+
+    Returns:
+        list[dict]: Matching events, oldest first.
+    """
     with _lock:
         return [e for e in _events if e["id"] > after_id and e["kind"].startswith(kind_prefix)]
 
 
 def last(kind_prefix: str) -> dict | None:
+    """Return the newest event whose kind starts with a prefix.
+
+    Args:
+        kind_prefix (str): Start of the event kind.
+
+    Returns:
+        dict | None: The event, or None if there is none.
+    """
     with _lock:
         for e in reversed(_events):
             if e["kind"].startswith(kind_prefix):

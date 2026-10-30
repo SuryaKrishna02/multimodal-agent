@@ -4,6 +4,7 @@ Gemma 4 in llama.cpp takes images, not video. So "seeing the screen" means picki
 which frames to send. The sampler looks every SCREEN_SAMPLE_EVERY_S seconds and keeps
 a frame only when enough of the screen changed. Fewer frames = fewer tokens.
 """
+
 import json
 import time
 from pathlib import Path
@@ -12,7 +13,7 @@ import mss
 import numpy as np
 from PIL import Image
 
-from agent import config, events
+from agent import config, events, platforms
 
 CAPTURES = config.RUNTIME / "captures"
 
@@ -23,14 +24,21 @@ def capture(monitor: int = 1) -> Image.Image:
         shot = m.grab(m.monitors[monitor])
     img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     img.thumbnail((config.SCREEN_MAX_SIDE, config.SCREEN_MAX_SIDE))
-    if np.asarray(img).std() < 3:   # a flat image usually means macOS blocked the capture
-        events.emit("senses.screen.warning",
-                    message="Screenshot is blank: grant Screen Recording to your terminal app "
-                            "(System Settings > Privacy & Security > Screen Recording).")
+    if np.asarray(img).std() < 3:  # a flat image usually means the OS blocked the capture
+        events.emit("senses.screen.warning", message=platforms.current().screen_blank_hint)
     return img
 
 
 def save(img: Image.Image, name: str | None = None) -> Path:
+    """Save a screenshot as a PNG in the captures folder.
+
+    Args:
+        img (Image.Image): The image to save.
+        name (str, optional): File name. Defaults to a timestamped name.
+
+    Returns:
+        Path: Path of the saved file.
+    """
     CAPTURES.mkdir(parents=True, exist_ok=True)
     path = CAPTURES / (name or f"screen-{time.strftime('%Y%m%d-%H%M%S')}.png")
     img.save(path)
@@ -50,10 +58,24 @@ class Sampler:
     """Keep a frame when the screen changed by more than the threshold since the last kept frame."""
 
     def __init__(self, threshold: float = config.SCREEN_CHANGE_THRESHOLD):
+        """Create a sampler.
+
+        Args:
+            threshold (float, optional): Share of changed pixels that makes a frame worth keeping.
+                Defaults to `config.SCREEN_CHANGE_THRESHOLD`.
+        """
         self.threshold = threshold
         self.last_kept: Image.Image | None = None
 
     def offer(self, frame: Image.Image) -> bool:
+        """Decide whether to keep a frame.
+
+        Args:
+            frame (Image.Image): The newest screenshot.
+
+        Returns:
+            bool: True if the screen changed enough since the last kept frame, or if this is the first frame.
+        """
         if self.last_kept is None or changed_fraction(self.last_kept, frame) > self.threshold:
             self.last_kept = frame
             return True
@@ -61,7 +83,7 @@ class Sampler:
 
 
 def record_frames(out_dir: Path, seconds: float, fps: float = 2.0) -> int:
-    """Save raw frames + timestamps, to build a gold set for the sampler eval."""
+    """Save raw frames + timestamps, as a case for the sampler eval."""
     out_dir.mkdir(parents=True, exist_ok=True)
     t0, n, index = time.time(), 0, []
     while time.time() - t0 < seconds:

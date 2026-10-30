@@ -1,26 +1,25 @@
-"""Global hotkey: press Ctrl+Option+Space anywhere -> Task 2 (look at my screen and help).
+"""Global hotkey: press the combo in config.HOTKEY anywhere -> Task 2 (look at my screen and help).
 
-macOS only delivers global key events to apps you trust. Grant your terminal app
-Accessibility and Input Monitoring (System Settings > Privacy & Security), then restart it.
+How the key listener starts and which OS permissions it needs is the OS plug-in's job
+(agent/platforms/<os>.py): macOS, for one, only delivers global key events to apps you trust.
 """
+
 import threading
 
-import HIServices          # installed with pynput (pyobjc)
-from pynput import keyboard
-
-from agent import config, events
+from agent import config, events, platforms
 
 
-def listen(on_press) -> keyboard.GlobalHotKeys:
+def listen(on_press):
     """Start listening in a background thread. on_press() runs in its own thread."""
+
     def fire():
         events.emit("hotkey.pressed", combo=config.HOTKEY)
         threading.Thread(target=on_press, daemon=True).start()
 
-    listener = keyboard.GlobalHotKeys({config.HOTKEY: fire})
-    listener.start()
-    if not HIServices.AXIsProcessTrusted():
-        events.emit("hotkey.warning", message="Hotkey not trusted by macOS: grant Accessibility and "
-                                              "Input Monitoring to your terminal app, then restart it.")
+    plat = platforms.current()
+    listener = plat.start_hotkey(config.HOTKEY, fire)
+    warning = plat.hotkey_warning()
+    if warning:
+        events.emit("hotkey.warning", message=warning)
     events.emit("hotkey.listening", combo=config.HOTKEY)
     return listener

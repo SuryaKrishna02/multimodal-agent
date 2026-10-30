@@ -1,52 +1,58 @@
-# Setup (after the session)
+# Setup
 
-Run the whole agent on your own Mac. Everything stays on your machine: the model servers listen on
-`127.0.0.1` only, and nothing is sent to the internet after the one-time downloads.
+Run the whole agent on your own machine. Everything stays on it: the model servers listen on
+`127.0.0.1` only, and the agent sends nothing to the internet after the one-time downloads.
 
 ## Requirements
 
 | | |
 |---|---|
-| Mac | Apple Silicon (M1 or newer). Tested on an M4 with 24 GB, macOS 27.0.1 |
+| Machine | Verified: Apple Silicon Mac (M4, 24 GB, macOS 27.0.1). Other OSes and GPUs: see [PLATFORMS.md](PLATFORMS.md) |
 | Memory | 16 GB works with the E2B tier. 24 GB or more is better for E4B |
 | Disk | about 11 GB (both model tiers + embedding model) |
 | Python | 3.10 or newer (tested with 3.13.3) |
-| Tools | `curl`, `shasum`, `tar` (built into macOS) |
-| Optional | `ffmpeg` for screen-video input: `brew install ffmpeg` (tested with 9.0.2) |
+| Optional | `ffmpeg` + `ffprobe` for screen-video input and the two synthetic video cases of the task2 eval (the doctor prints the install command for your OS) |
 
-Not supported: Linux, Windows, Intel Macs, NVIDIA, Colab.
+If your OS or GPU has no plug-in yet, `setup.py` stops with a message naming the file to add.
+Adding one is a single-file PR: [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Install
 
 ```bash
 git clone <this repo> && cd multimodal-agent
-scripts/setup.sh
+python3 scripts/setup.py
 ```
 
-`setup.sh` downloads and checksum-verifies:
-- llama.cpp **b11669** (= v0.7.0), the official prebuilt macOS arm64 binaries with Metal
+`setup.py` detects your OS and accelerator, then downloads and checksum-verifies:
+- llama.cpp **b11960** (= v0.8.0), the official prebuilt binaries for your accelerator
+  (on a Mac: Metal, from `agent/accel/metal.py`)
 - Gemma 4 **E4B** and **E2B** (Q4_0, from Google's QAT checkpoints) + their Q8_0 image/audio projectors
 - **EmbeddingGemma-2** (Q8_0) + its projector, for memory search over text, images and audio
 - **Silero VAD** v6.2.3 (ONNX file only)
-- a `.venv` with the pinned packages from `requirements.lock`
+- a `.venv` with the pinned packages (`requirements/lock-<os>.txt`, else `requirements/base.txt`)
 
-Then check that text, image and audio all work:
+Skip what you do not need: `python3 scripts/setup.py --only e2b embed vad`.
+Force a choice: `AGENT_ACCEL=<name>` or `AGENT_PLATFORM=<name>` (names: `cli.py doctor`).
+
+Then check what the agent detected, and that text, image and audio all work. Use the venv's Python
+(`.venv/bin/python`, or `.venv\Scripts\python.exe` on Windows):
 
 ```bash
-.venv/bin/python scripts/smoke_test.py             # E4B
-.venv/bin/python scripts/smoke_test.py --tier e2b  # E2B
+.venv/bin/python cli.py doctor [--exercise]   # --exercise runs screen recording + speech for real
+.venv/bin/python cli.py smoke                 # E4B
+.venv/bin/python cli.py smoke --tier e2b      # E2B
 ```
 
-## macOS permissions
+## OS permissions
 
-Grant these to the app you run the agent from (Terminal, iTerm, VS Code...) in
-**System Settings > Privacy & Security**, then restart that app:
+`cli.py doctor` lists the ones your OS needs. On macOS, open **System Settings > Privacy & Security**.
+Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code, or another terminal app). Then restart that app:
 
 | Permission | Needed for | Symptom when missing |
 |---|---|---|
 | Microphone | recording voice notes | silent recordings |
-| Screen Recording | Task 2, screen videos, screen evals | blank screenshots; the dashboard shows a warning |
-| Accessibility + Input Monitoring | the global hotkey (Ctrl+Option+Space) | the hotkey does nothing; warning in the event log |
+| Screen Recording | Task 2, screen videos, screen evals | blank screenshots, and the dashboard shows a warning |
+| Accessibility + Input Monitoring | the global hotkey (Ctrl+Option+Space) | the hotkey does nothing, and the event log shows a warning |
 
 ## Run
 
@@ -75,20 +81,21 @@ Switch to the small model for any command: `AGENT_TIER=e2b .venv/bin/python cli.
 
 ```bash
 .venv/bin/python evals/run_all.py          # print the scorecard
-.venv/bin/python evals/run_all.py --run    # run all evals that have gold data
+.venv/bin/python evals/run_all.py --run    # run all evals on the synthetic cases and your own
+.venv/bin/python evals/run_all.py status   # how many cases each eval has
 ```
 
-The gold sets are personal recordings and are not in the repo. To make your own, follow
-[RECORDING_GUIDE.md](RECORDING_GUIDE.md).
+There is nothing to record. The first run builds synthetic cases (speech, screenshots, tool calls, memories)
+into `data/evals/synthetic/`. To add a case from your own use, see [EVALS.md](EVALS.md).
 
 ## Troubleshooting
 
-- **`llama-server exited`**: read `data/runtime/llama-llm.log`. Usually a missing model file:
-  re-run `scripts/setup.sh`.
+- **`llama-server exited`**: read `data/runtime/llama-llm.log`. Most often a model file is missing:
+  re-run `python3 scripts/setup.py`.
 - **Port 9931 in use**: another llama-server is running. Run `.venv/bin/python cli.py stop`.
-- **Slow or swapping**: close other large apps, or use `AGENT_TIER=e2b`.
-- **"Apple could not verify llama-server"**: this happens only if the binaries were downloaded
-  in a browser. `setup.sh` uses curl, which does not set the quarantine flag.
+- **Slow or swapping**: close other large apps, or set `AGENT_TIER=e2b`.
+- **`Apple could not verify llama-server`**: this happens only when a browser downloaded the
+  binaries. `setup.py` downloads from Python, which does not set the quarantine flag.
 
 ## Session 3 preview
 

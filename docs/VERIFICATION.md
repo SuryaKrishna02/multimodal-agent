@@ -1,76 +1,111 @@
 # Verification report (2026-10-26)
 
-What was checked before building Session 1, on the target machine: Apple M4, 24 GB, macOS 27.0.1.
+This report covers the checks before Session 1, on the target machine: Apple M4, 24 GB, macOS 27.0.1.
 
 ## Pinned versions
 
 | Item | Version | Source |
 |---|---|---|
-| llama.cpp | **b11669** (= v0.7.0, commit `620d2225c`) | official `llama-b11669-bin-macos-arm64.tar.gz`, sha256 `dbed5549…13fd` |
+| llama.cpp | **b11960** (= v0.8.0, commit `8642541b2`) | official `llama-b11960-bin-macos-arm64.tar.gz`, sha256 `58e5a5e1…1e3c` |
 | Gemma 4 E4B | `gemma-4-E4B-it-Q4_0.gguf` + `mmproj-gemma-4-E4B-it-Q8_0.gguf` | `ggml-org/gemma-4-E4B-it-GGUF` @ `a69f018` |
 | Gemma 4 E2B | `gemma-4-E2B-it-Q4_0.gguf` + `mmproj-gemma-4-E2B-it-Q8_0.gguf` | `ggml-org/gemma-4-E2B-it-GGUF` @ `6938c58` |
 | Embeddings | `embeddinggemma-2-Q8_0.gguf` + `mmproj-embeddinggemma-2-Q8_0.gguf` | `ggml-org/embeddinggemma-2-GGUF` @ `58faf90` |
 | Silero VAD | `silero_vad.onnx` | `snakers4/silero-vad` tag v6.2.3 |
-| Python | 3.13.3, packages in `requirements.lock` | |
+| Python | 3.13.3, packages in `requirements/lock-macos.txt` | |
 | ffmpeg + ffprobe | 9.0.2 (optional, for video) | Homebrew `brew install ffmpeg` |
 
-All checksums are in `scripts/setup.sh`. The Q4_0 weights are converted from Google's QAT checkpoints
+All checksums are in `agent/pins.py` (models) and `agent/accel/metal.py` (llama.cpp). The Q4_0 weights come from Google's QAT checkpoints
 (`google/gemma-4-E4B-it-qat-q4_0-unquantized`), so Q4_0 is the intended quantization, not a shortcut.
 
 ## Highest risk: Gemma 4 audio through llama-server on Metal — WORKS
 
-- Audio support (conformer encoder) was merged in llama.cpp PR #21421 (2026-04-12). The server
-  bug that returned HTTP 500 for `input_audio` (issue #21868) was closed on 2026-04-13.
-- On b11669, `/v1/chat/completions` accepts `{"type": "input_audio", "input_audio": {"data": <base64 wav>}}`
+- llama.cpp merged audio support (conformer encoder) in PR #21421 (2026-04-12). Issue #21868, the server
+  bug that returned HTTP 500 for `input_audio`, closed on 2026-04-13.
+- On b11960, `/v1/chat/completions` accepts `{"type": "input_audio", "input_audio": {"data": <base64 wav>}}`
   on both E4B and E2B. `/props` reports `audio: true`. The server prints
-  "audio input is in experimental stage", which is expected.
-- `scripts/smoke_test.py` checks text, image, audio and tool calls in about 5 s. All pass on both tiers.
+  "audio input is in experimental stage". This message is normal.
+- `scripts/smoke_test.py` checks text, image, audio, tool calls and video in about 8 s on E4B and 5 s on E2B. All pass on both tiers.
 
 ## Measured facts (and corrections to the brief)
 
 | Brief said | Measured / found |
 |---|---|
-| Audio clips max 30 s | Confirmed. llama.cpp **splits longer clips every 30 s itself** (`tools/mtmd/mtmd-audio.cpp`, Gemma 4 preprocessor), even mid-word. A 35 s clip was fully transcribed, so there is no hard error. We still chunk at pauses, under 28 s. |
+| Audio clips max 30 s | Confirmed. llama.cpp **splits longer clips every 30 s itself** (`tools/mtmd/mtmd-audio.cpp`, Gemma 4 preprocessor), even mid-word. The model transcribed a 35 s clip in full, so there is no hard error. We still chunk at pauses, under 28 s. |
 | ~25 tokens/s of audio | Confirmed: a 35.5 s clip used 906 prompt tokens, about 25/s plus the text. |
-| Video not supported in llama.cpp | **Outdated**: b11669 accepts `input_video` for Gemma 4, so the harness now supports it (see "Video input" below). |
-| Function calling is weak | Simple cases work on both tiers. Found a real quirk: **with thinking off, the reply after a tool result is empty** (same as ollama/ollama#19044). Fix in `brain.respond()`: thinking on for that one step. |
-| Measure peak memory | E4B server 4–7 GB resident (varies with paging of memory-mapped weights), E2B ~3.8 GB, embeddings ~1 GB. System total during evals with the dashboard and Chrome open: ~12–14.6 GB of 24 GB. |
+| Video not supported in llama.cpp | **Outdated**: b11960 accepts `input_video` for Gemma 4, so the harness now supports it (see "Video input" below). |
+| Function calling is weak | Simple cases work on both tiers. An earlier check found a quirk: **with thinking off, the reply after a tool result is empty** (same as ollama/ollama#19044). `brain.respond()` turns thinking on for that one step. A one-tool check on b11960 returned text with thinking off too, but one case does not prove the quirk is gone, so the workaround stays. |
+| Measure peak memory | Peak resident memory of the server: E4B 5.9 GB, E2B 3.7 GB, embeddings 1.1 GB. System total during the serving eval: 13.4 GB (E4B) and 12.1 GB (E2B) of 24 GB. |
 
-Speed on the M4 (from `llama-bench` and the serving eval):
+Speed on the M4 (serving eval on b11960, `evals/results/<tier>/serving.json`):
 
 | | E4B | E2B |
 |---|---|---|
-| Prompt processing (2k tokens) | ~290 tok/s | ~490–600 tok/s |
-| Generation | ~29 tok/s | ~53 tok/s |
-| Time to first token, short prompt | 0.14 s | 0.09 s |
-| Time to first token, ~2.4k-token prompt | **8.2 s** | 5.0 s |
+| Prompt processing | 328 tok/s | 627 tok/s |
+| Generation | 29.3 tok/s | 53.7 tok/s |
+| Time to first token, short prompt | 0.14 s | 0.08 s |
+| Time to first token, ~2.4k-token prompt | **7.4 s** | 3.9 s |
 
-The base M4 GPU is the limit for prompt processing: Metal is ~3x faster than CPU, and flash attention and
-larger micro-batches did not help. So a 30 s clip plus a screenshot (~1.1k tokens) costs ~4 s before the
+Prompt processing is what costs time. A 30 s clip plus a screenshot (~1.1k tokens) takes ~3.4 s before the
 first word on E4B. Keep the system prompt stable so llama.cpp can reuse its cached prefix.
+
+## Checks on the current build (b11960 = llama.cpp v0.8.0, 2026-10-30)
+
+The GitHub release `v0.8.0` has no binaries. Its only asset, `nightly-tag.txt`, names the build: `b11960`.
+The tag `v0.8.0` and the release `b11960` point to the same commit, `8642541b255b`. The sha256 of the
+downloaded archive matches the digest that GitHub publishes.
+
+- Every `llama-server` flag in `agent/serving.py` exists in `--help`: `--mmproj`, `--host`, `--port`,
+  `--no-webui`, `--metrics`, `--video-fps`, `--video-ffmpeg-dir`, `--embeddings`, `-c`, `-np`.
+- `cli.py smoke` passes text, image, audio, tools and video on both tiers.
+- `chat_template_kwargs.enable_thinking` works: with it on, the reply carries `reasoning_content`; with it off, it does not.
+- The embedding server returns 768 dimensions. Similar sentences score 0.95 and an unrelated one 0.65.
+- Evals: `serving` ran on both tiers (table above). The other evals ran on the **synthetic** cases
+  ([EVALS.md](EVALS.md)) on 2026-10-30, E4B tier, M4 / macOS 27.0.1, with `python cli.py evals --run`.
+  Every metric that has a threshold passed:
+
+  | Eval | Cases | Result |
+  |---|---|---|
+  | tools | 28 | success 1.0, unsafe blocked 1.0, policy accuracy 1.0 (no model) |
+  | tool_calls | 16 | E4B and E2B: tool accuracy 1.0, exact 1.0 |
+  | memory | 35 | recall@3 0.958, junk stored 0.0, good rejected 0.0 (no chat model) |
+  | asr | 10 | E4B and E2B: WER 0.044 (errors on the noisy and quiet clips; 4 of 10 transcripts differ between tiers) |
+  | vad | 5 | false trigger 0.007, missed speech 0.0 |
+  | screen | 4 | key-moment recall 1.0, kept ratio 0.065 |
+  | structured | 10 | E4B and E2B: valid 1.0 (constrained and prompt-only) |
+  | task1 | 5 | E4B and E2B: precision 1.0, recall 1.0 |
+  | task2 | 10 | E4B: correct 1.0 (images and videos). E2B: correct 0.9 (images 0.875, videos 1.0) |
+
+  The one memory miss: "what does Priya need from me?" returned the slides note but not the action item
+  "Email Priya the slides". The one E2B task2 miss: on the failing-pytest screenshot (`test-failure.png`) it
+  flagged the problem ("One test in `test_math.py` failed") but did not name the failing test `test_add`, so
+  the keyword check failed. These scores come from synthetic cases and are optimistic (see "Not verified yet").
 
 ## Video input (added after Session 1 was first committed)
 
-One `{"type": "input_video", "input_video": {"data": <base64 mp4/mov>}}` part. What happens inside
-llama-server (`tools/mtmd/mtmd-helper.cpp`): it runs **ffmpeg + ffprobe** (from PATH or
-`--video-ffmpeg-dir`) to take `--video-fps` frames per second (default 4; we use 1), adds a text
-timestamp every 5 s, and sends every frame to Gemma 4 as an ordinary image. There is no
-Gemma-specific video encoder, and the **audio track is ignored**. Google's guidance for Gemma 4:
+One `{"type": "input_video", "input_video": {"data": <base64 mp4/mov>}}` part. Inside llama-server (`tools/mtmd/mtmd-helper.cpp`), this happens:
+
+1. It runs **ffmpeg + ffprobe** (from PATH or `--video-ffmpeg-dir`).
+2. It takes `--video-fps` frames per second (default 4, and we use 1).
+3. It adds a text timestamp every 5 s.
+4. It sends every frame to Gemma 4 as an ordinary image.
+
+ There is no
+Gemma-specific video encoder, and it **ignores the audio track**. Google's guidance for Gemma 4:
 up to 60 s at 1 fps, with low per-frame budgets.
 
-Measured on a 12 s synthetic screen recording (traceback at 5 s, dialog at 9 s). Every run named
-both events correctly:
+Measured on b11960 with a 12 s synthetic screen recording (traceback at 5 s, dialog at 9 s), and a 3 s clip for the Retina row.
+The table shows cost only, not answer quality:
 
 | Tier | fps | Frame size | Prompt tokens | Time |
 |---|---|---|---|---|
-| E4B | 1 | 1280x720 | 4,954 | 31.5 s |
-| E4B | 1 | 960x540 | 2,734 | 17.4 s |
-| E4B | 1 | **640x360** | **1,342** | **9.3 s** |
-| E4B | 4 | 640x360 | 5,159 | 33.6 s |
-| E2B | 1 | 640x360 | 1,343 | 5.7 s |
-| E2B | 1 | 2940x1912 (Retina, native) | 3,255 for 3 s | 21.3 s |
+| E4B | 1 | 1280x720 | 6,574 | 43.6 s |
+| E4B | 1 | 960x540 | 3,614 | 25.5 s |
+| E4B | 1 | **640x360** | **1,758** | **17.9 s** |
+| E4B | 4 | 640x360 | 6,740 | 52.8 s |
+| E2B | 1 | 640x360 | 1,758 | 12.9 s |
+| E2B | 1 | 2940x1912 (Retina, native), 3 s clip | 3,237 | 30.6 s |
 
-Cost per frame follows the same rule as images: about **1 token per 48x48 pixels, capped at 1,120**.
+Cost grows with the area of a frame and the number of frames.
 So the harness records with macOS `screencapture -v`, shrinks to 640 px wide with ffmpeg, and runs
 the server at 1 fps. Smaller frames lose some fine terminal text: test on your own recordings.
 
@@ -97,14 +132,15 @@ the server at 1 fps. Smaller frames lose some fine terminal text: test on your o
 
 ## Embeddings (open decision 3): EmbeddingGemma-2 via a second llama-server
 
-Text, image and audio share one 768-d space. On a quick check: the error screenshot retrieved the
-matching text note (0.74), the voice note retrieved "Email Priya the slides" (0.73), and a spoken question
+Text, image and audio share one 768-d space. In a quick check, the error screenshot retrieved the
+matching text note (0.74). The voice note retrieved "Email Priya the slides" (0.73). A spoken question
 retrieved the right text memory (0.78). This makes "multimodal memory" in Session 2 cheap to build.
 
 ## Not verified yet
 
-- Real recordings: every eval was run end to end on a **synthetic** set (macOS `say` voices, rendered
-  screenshots) to check the code. Those results were deleted. Real numbers need your gold sets.
+- Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool
+  calls and memories). Text-to-speech is cleaner than a real voice, so ASR, VAD and Task 1 scores are optimistic.
+  Add your own cases with `python cli.py evals add` for numbers that reflect your voice and your screen.
 - Mic recording and the global hotkey need permissions that only you can grant. Please try
-  `cli.py note` and the hotkey once permissions are set.
+  `cli.py note` and the hotkey once you grant the permissions.
 - Memory use with a Google Meet call running alongside.

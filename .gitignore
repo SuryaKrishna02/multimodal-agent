@@ -225,12 +225,17 @@ __marimo__/
 data/runtime/
 data/workspace/
 evals/results/
-# Gold recordings are personal (voice, screenshots). Remove these lines to commit them.
-data/gold/**/*.wav
-data/gold/**/*.aiff
-data/gold/**/*.flac
-data/gold/**/*.png
-data/gold/**/*.jpg
-data/gold/**/*.jsonl
-data/gold/**/*.json
-data/gold/**/*.txt
+# Eval cases: synthetic ones are generated, yours may hold voice and screenshots
+data/evals/
+
+# Local tooling and AI-session files (kept out of the repository)
+AGENTS.md
+CLAUDE.md
+.github/styles/
+.vale.ini
+docs/style-guide.md
+.complexipy_cache/
+.DS_Store
+# Model weights and binaries (setup downloads them into .cache/)
+*.gguf
+*.onnx
