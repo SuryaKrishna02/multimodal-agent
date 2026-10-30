@@ -104,22 +104,26 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
       </marker>
     </defs>
 <text class="band" x="60" y="34">INPUTS</text>
-<rect class="box gray" x="60" y="44" width="220" height="66" rx="9"/>
+<rect class="box gray" x="60" y="44" width="220" height="84" rx="9"/>
 <text class="title" x="72" y="66">Microphone</text>
 <text class="sub" x="72" y="86">live or recorded clip</text>
-<rect class="box gray" x="320" y="44" width="220" height="66" rx="9"/>
+<rect class="box gray" x="320" y="44" width="220" height="84" rx="9"/>
 <text class="title" x="332" y="66">Screen</text>
 <text class="sub" x="332" y="86">screenshot or screen recording</text>
-<rect class="box gray" x="580" y="44" width="220" height="66" rx="9"/>
+<rect class="box gray" x="580" y="44" width="220" height="84" rx="9"/>
 <text class="title" x="592" y="66">Hotkey</text>
 <text class="sub" x="592" y="86">global key combo, ctrl+alt+space</text>
 <rect class="chip" x="764.8" y="51" width="27.2" height="19" rx="9.5"/><text class="chiptxt" x="778.4" y="64.5" text-anchor="middle">os</text>
-<rect class="box gray" x="840" y="44" width="220" height="66" rx="9"/>
+<rect class="box gray" x="840" y="44" width="220" height="84" rx="9"/>
 <text class="title" x="852" y="66">CLI  ·  cli.py</text>
-<text class="sub" x="852" y="86">serve · note · look · chat · memory</text>
-<rect class="box gray" x="1100" y="44" width="220" height="66" rx="9"/>
+<text class="sub" x="852" y="86">serve · stop · dashboard · hotkey</text>
+<text class="sub" x="852" y="102">note · look · chat · memory</text>
+<text class="sub" x="852" y="118">record-clip · record-screen</text>
+<rect class="box gray" x="1100" y="44" width="220" height="84" rx="9"/>
 <text class="title" x="1112" y="66">Dashboard</text>
 <text class="sub" x="1112" y="86">FastAPI :8765 · 7 tabs</text>
+<text class="sub" x="1112" y="102">chat · memory · tool approval</text>
+<text class="sub" x="1112" y="118">model switch · benchmark · evals</text>
 <rect class="grp teal" x="60" y="160" width="500" height="140" rx="14"/>
 <text class="glabel teal" x="76" y="184">2 · SENSES   agent/senses/</text>
 <rect class="box teal" x="76" y="196" width="144" height="88" rx="9"/>
@@ -145,12 +149,12 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <text class="title" x="988" y="218">Task 2  ·  screen_help() / watch_and_help()</text>
 <text class="sub" x="988" y="238">screen (image or video) → explain + fix</text>
 <text class="sub" x="988" y="255">result is stored in memory</text>
-<path class="arr" d="M148 110 V160" marker-end="url(#ah)"/>
-<path class="arr" d="M330 110 V160" marker-end="url(#ah)"/>
-<path class="arr" d="M470 110 V160" marker-end="url(#ah)"/>
-<path class="arr" d="M690 110 V160" marker-end="url(#ah)"/>
-<path class="arr" d="M950 110 V160" marker-end="url(#ah)"/>
-<path class="arr" d="M1210 110 V160" marker-end="url(#ah)"/>
+<path class="arr" d="M148 128 V160" marker-end="url(#ah)"/>
+<path class="arr" d="M330 128 V160" marker-end="url(#ah)"/>
+<path class="arr" d="M470 128 V160" marker-end="url(#ah)"/>
+<path class="arr" d="M690 128 V160" marker-end="url(#ah)"/>
+<path class="arr" d="M950 128 V160" marker-end="url(#ah)"/>
+<path class="arr" d="M1210 128 V160" marker-end="url(#ah)"/>
 <path class="arr" d="M600 238 H560" marker-end="url(#ah)"/>
 <rect class="grp blue" x="60" y="350" width="820" height="290" rx="14"/>
 <text class="glabel blue" x="76" y="374">3 · BRAIN   agent/brain.py</text>
@@ -160,8 +164,9 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <text class="sub" x="88" y="449">→ OpenAI-style parts</text>
 <rect class="box blue" x="296" y="390" width="170" height="84" rx="9"/>
 <text class="title" x="308" y="412">fit_budget()</text>
-<text class="sub" x="308" y="432">system prompt + top-3</text>
-<text class="sub" x="308" y="449">memories, trims history</text>
+<text class="sub" x="308" y="432">prompt + top-3 memories +</text>
+<text class="sub" x="308" y="449">tool schemas; drops old</text>
+<text class="sub" x="308" y="466">history, then memories</text>
 <rect class="box blue" x="516" y="390" width="170" height="84" rx="9"/>
 <text class="title" x="528" y="412">send()</text>
 <text class="sub" x="528" y="432">POST to llama-server</text>
@@ -173,15 +178,24 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <path class="arr" d="M246 432 H296" marker-end="url(#ah)"/>
 <path class="arr" d="M466 432 H516" marker-end="url(#ah)"/>
 <path class="arr" d="M686 432 H706" marker-end="url(#ah)"/>
-<rect class="box blue" x="76" y="500" width="390" height="84" rx="9"/>
+<rect class="box blue" x="76" y="500" width="250" height="84" rx="9"/>
 <text class="title" x="88" y="522">ask_json()</text>
-<text class="sub" x="88" y="542">structured output: JSON schema → grammar</text>
-<text class="sub" x="88" y="559">validate + retry</text>
-<rect class="box blue" x="486" y="500" width="380" height="84" rx="9"/>
-<text class="title" x="498" y="522">respond()</text>
-<text class="sub" x="498" y="542">tool loop, up to 4 steps</text>
-<text class="sub" x="498" y="559">invalid call → re-ask, up to 2 retries</text>
-<text class="lbl" x="76" y="612" text-anchor="start">Both entry points run the pipeline above. cli.py chat and /api/chat call respond() directly.</text>
+<text class="sub" x="88" y="542">structured output: JSON</text>
+<text class="sub" x="88" y="559">schema → grammar</text>
+<text class="sub" x="88" y="576">validate + retry once</text>
+<rect class="box red" x="346" y="500" width="250" height="84" rx="9"/>
+<text class="title" x="358" y="522">tools.select()</text>
+<text class="sub" x="358" y="542">embed the request, rank tools</text>
+<text class="sub" x="358" y="559">by description + examples,</text>
+<text class="sub" x="358" y="576">offer the top 5 only</text>
+<rect class="box blue" x="616" y="500" width="250" height="84" rx="9"/>
+<text class="title" x="628" y="522">respond()</text>
+<text class="sub" x="628" y="542">tool loop, up to 4 steps</text>
+<text class="sub" x="628" y="559">bad call → re-ask, up to 2 retries</text>
+<text class="sub" x="628" y="576">thinking on after a tool result</text>
+<path class="arr" d="M596 542 H616" marker-end="url(#ah)"/>
+<text class="lbl" x="76" y="612" text-anchor="start">Both run the pipeline above. Tasks call ask_json();</text>
+<text class="lbl" x="76" y="628" text-anchor="start">cli.py chat and /api/chat call respond() directly.</text>
 <rect class="grp red" x="920" y="350" width="400" height="290" rx="14"/>
 <text class="glabel red" x="936" y="374">5 · TOOLS   agent/tools/</text>
 <rect class="box red" x="936" y="390" width="368" height="50" rx="9"/>
@@ -192,7 +206,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <text class="sub" x="948" y="492">get_time · calculator · save_note</text>
 <text class="sub" x="948" y="509">search_memory · list_files · read_file</text>
 <rect class="box amber" x="936" y="522" width="368" height="52" rx="9"/>
-<text class="title" x="948" y="544">CONFIRM  (user approves)</text>
+<text class="title" x="948" y="544">CONFIRM  (approved in the dashboard)</text>
 <text class="sub" x="948" y="564">write_file · run_shell</text>
 <rect class="box red" x="936" y="582" width="368" height="48" rx="9"/>
 <text class="title" x="948" y="604">BLOCKED</text>
@@ -202,7 +216,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <path class="arr" d="M800 300 V350" marker-end="url(#ah)"/>
 <text class="lbl" x="810" y="331" text-anchor="start">task prompts</text>
 <path class="arr" d="M866 542 H920" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
-<text class="lbl" x="893" y="530" text-anchor="middle">calls</text>
+<text class="lbl" x="904" y="530" text-anchor="end">calls</text>
 <rect class="grp orange" x="60" y="700" width="500" height="170" rx="14"/>
 <text class="glabel orange" x="76" y="724">1 · SERVING   agent/serving.py</text>
 <rect class="box orange" x="76" y="736" width="250" height="106" rx="9"/>
@@ -210,6 +224,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <text class="sub" x="88" y="778">Gemma 4 E4B (default) or E2B, Q4_0</text>
 <text class="sub" x="88" y="795">mmproj: audio · image · video</text>
 <text class="sub" x="88" y="812">16k context</text>
+<text class="sub" x="88" y="829">video: 1 fps, decoded with ffmpeg</text>
 <rect class="chip" x="284.2" y="743" width="33.8" height="19" rx="9.5"/><text class="chiptxt" x="301.1" y="756.5" text-anchor="middle">gpu</text>
 <rect class="box orange" x="346" y="736" width="198" height="106" rx="9"/>
 <text class="title" x="358" y="758">llama-server  :9932</text>
@@ -235,6 +250,10 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <path class="arr" d="M750 640 V700" marker-end="url(#ah)"/>
 <text class="lbl" x="742" y="690" text-anchor="end">recall top 3</text>
 <path class="arr" d="M600 800 H560" marker-end="url(#ah)" marker-start="url(#ah-s)"/>
+<path class="arr" d="M520 584 V736" marker-end="url(#ah)"/>
+<text class="lbl" x="530" y="690" text-anchor="start">embed tools</text>
+<path class="arr" d="M910 284 V790 H900" marker-end="url(#ah)"/>
+<text class="lbl" x="920" y="331" text-anchor="start">task results</text>
 <text class="lbl" x="580" y="790" text-anchor="middle">embed</text>
 <path class="arr" d="M960 640 V672 H840 V700" marker-end="url(#ah)"/>
 <text class="lbl" x="972" y="668" text-anchor="start">save_note · search_memory</text>
@@ -248,6 +267,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <text class="sub" x="88" y="1019">metal.py: Apple Silicon, verified reference</text>
 <text class="sub" x="88" y="1036">_template.py: copy this for CUDA, Vulkan, CPU</text>
 <text class="sub" x="88" y="1053">hooks: download_for · server_args · server_memory_gb</text>
+<text class="sub" x="88" y="1070">llama.cpp build pinned in config.LLAMA_BUILD</text>
 <rect class="box violet" x="504" y="960" width="410" height="134" rx="9"/>
 <text class="title" x="516" y="982">agent/platforms/   (operating system)</text>
 <text class="sub" x="516" y="1002">base.py: Platform contract + Unsupported</text>
@@ -291,7 +311,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
   <table>
     <thead><tr><th>Segment</th><th>Files</th><th>Eval (folder in <code>evals/</code>)</th></tr></thead>
     <tbody>
-      <tr><td>0 Harness map, eval pattern</td><td>this page, <code>evals/common.py</code></td><td>n/a</td></tr>
+      <tr><td>0 Harness map, eval pattern</td><td>this page, <code>agent/events.py</code>, <code>evals/common.py</code>, <code>evals/cases.py</code>, <code>evals/synthetic/</code></td><td>n/a</td></tr>
       <tr><td>1 Serving</td><td><code>agent/config.py</code>, <code>agent/serving.py</code></td><td><code>serving</code></td></tr>
       <tr><td>2 Senses</td><td><code>agent/senses/audio.py</code>, <code>agent/senses/screen.py</code>, <code>agent/senses/video.py</code></td><td><code>vad</code>, <code>asr</code>, <code>screen</code></td></tr>
       <tr><td>3 Brain</td><td><code>agent/brain.py</code></td><td><code>structured</code>, <code>tool_calls</code></td></tr>
@@ -320,11 +340,15 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
   <ol class="flow">
     <li>A sense produces raw input: a 16 kHz float array, a PIL image or a video file.</li>
     <li><code>brain.part()</code> turns it into an OpenAI-style content part (base64 WAV, PNG or MP4).</li>
-    <li><code>brain.fit_budget()</code> adds the system prompt and the top 3 memories. It estimates tokens: audio at 25 per second,
+    <li>For a chat turn, <code>brain.respond()</code> calls <code>tools.select()</code>. It embeds the request with the embedding server and ranks every
+    tool by its description plus example requests. Only the top 5 tool schemas go into the request. If the embedding server is down, the first 5 registered tools are used.</li>
+    <li><code>brain.fit_budget()</code> adds the system prompt, the top 3 memories and the tool schemas. It estimates tokens: audio at 25 per second,
     an image at pixels / 2304 (up to 1,120), a video at frames x image, text at chars / 4.
-    It drops old history if the request does not fit.</li>
+    If the request does not fit, it drops the oldest history first, then the memories.</li>
     <li><code>brain.send()</code> writes the exact request to <code>data/runtime/last_request.json</code>, logs it to the event log, and posts it to llama-server.</li>
-    <li>A reply with <code>tool_calls</code> goes through <code>tools.run()</code>: schema check, tier, guard, execute. The result returns to the model as a <code>tool</code> message and the loop runs again.</li>
+    <li>A reply with <code>tool_calls</code> goes through <code>tools.run()</code>: schema check, tier, guard, execute. The result returns to the model as a <code>tool</code> message and the loop runs again, with thinking turned on from the second step
+    (a Gemma 4 quirk: with thinking off, the reply after a tool result comes back empty). A <code>confirm</code> call returns <code>pending</code> until the user approves it in the dashboard.
+    A <code>blocked</code> call never runs. When the retries for invalid calls run out, the loop stops and says so.</li>
   </ol>
 </main>
 </body>

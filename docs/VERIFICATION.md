@@ -75,10 +75,10 @@ downloaded archive matches the digest that GitHub publishes.
   | task1 | 5 | E4B and E2B: precision 1.0, recall 1.0 |
   | task2 | 10 | E4B: correct 1.0 (images and videos). E2B: correct 0.9 (images 0.875, videos 1.0) |
 
-  The one memory miss: "what does Priya need from me?" returned the slides note but not the action item
-  "Email Priya the slides". The one E2B task2 miss: on the failing-pytest screenshot (`test-failure.png`) it
-  flagged the problem ("One test in `test_math.py` failed") but did not name the failing test `test_add`, so
-  the keyword check failed. These scores come from synthetic cases and are optimistic (see "Not verified yet").
+  The one memory miss: the query "what does Priya need from me?" returned the slides note.
+  It did not return the action item "Email Priya the slides".
+  The one E2B task2 miss was the failing-pytest screenshot (`test-failure.png`). E2B flagged the problem
+  ("One test in `test_math.py` failed"). It did not name the failing test `test_add`, so the keyword check failed. These scores come from synthetic cases and are optimistic (see "Not verified yet").
 
 ## Video input (added after Session 1 was first committed)
 
@@ -93,7 +93,7 @@ One `{"type": "input_video", "input_video": {"data": <base64 mp4/mov>}}` part. I
 Gemma-specific video encoder, and it **ignores the audio track**. Google's guidance for Gemma 4:
 up to 60 s at 1 fps, with low per-frame budgets.
 
-Measured on b11960 with a 12 s synthetic screen recording (traceback at 5 s, dialog at 9 s), and a 3 s clip for the Retina row.
+Measured on b11960 with a 12 s synthetic screen recording (traceback at 5 s, dialog at 9 s). The Retina row used a 3 s clip.
 The table shows cost only, not answer quality:
 
 | Tier | fps | Frame size | Prompt tokens | Time |
