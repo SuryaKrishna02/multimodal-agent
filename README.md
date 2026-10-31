@@ -1,7 +1,8 @@
 # multimodal-agent
 
 A teaching harness for a personal agent that **listens, sees, remembers and acts**, entirely on-device
-with open models. Built for a three-part coding series of the Multimodal AI Group at Cohere Labs Open Science.
+with open models. Built for a three-part coding series of the Multimodal AI Group of the
+[Cohere Labs Open Science Community](https://labscommunity.cohere.com/home).
 
 - Inference: [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`, pinned and checksummed ([docs/SETUP.md](docs/SETUP.md)). Verified on Apple Metal. Other OSes and GPUs plug in as single files ([CONTRIBUTING.md](CONTRIBUTING.md))
 - Model: Gemma 4 **E4B** (default) or **E2B**: text, image, audio and screen video (sampled frames, no soundtrack) in; text out (no speech output)
@@ -49,7 +50,7 @@ evals/synthetic/     generates the synthetic cases (speech, screenshots, tool ca
 evals/cases.py       add your own cases, show what exists
 evals/run_all.py     the scorecard
 data/evals/          synthetic/ (generated) and user/ (yours), git-ignored
-docs/                SETUP, PLATFORMS, EVALS, architecture.html (diagram), VERIFICATION, session-1-primer.html (slides)
+docs/                SETUP, PLATFORMS, EVALS, architecture.md (diagram), VERIFICATION, index.html + session-N-primer.html (slides)
 CONTRIBUTING.md      add an OS or a GPU backend with one file
 tests/               plug-in contract tests (stdlib only)
 scripts/             setup.py, doctor.py, smoke_test.py
@@ -60,3 +61,9 @@ requirements/        base.txt (portable pins), lock-<os>.txt, dev.txt (ruff, pyr
 
 Session 1 (the core loop) is complete. Sessions 2 (always on, learning) and 3 (voice, skills, MCP)
 come next. [docs/VERIFICATION.md](docs/VERIFICATION.md) lists what we tested and what we found.
+
+## Slides
+
+The slides for each session are at <https://suryakrishna02.github.io/multimodal-agent/>. GitHub Pages publishes the
+`docs/` folder of `main`, so everything in that folder is public. To add a session, put its slides in
+`docs/session-N-primer.html` and link them from [docs/index.html](docs/index.html).
