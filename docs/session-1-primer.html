@@ -461,6 +461,8 @@ body.flow .goal-grid { grid-template-columns: 1fr; }
 body.flow .series-band { font-size: 20px; padding: 16px; }
 /* With no source row, code slides can use the space down to the logo. */
 body:not(.flow) #deck .slide:has(.walk) { padding-bottom: 100px; }
+/* The logo sits on the left, under the code. A long card column on the right can use the space down to the bottom bar. */
+body:not(.flow) #deck .slide.walk-long:has(.walk) { padding-bottom: 28px; }
 /* ---------- The two tasks slide ---------- */
 .task-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; flex: 1; min-height: 0; grid-auto-rows: 1fr; align-items: stretch; }
 .task-grid p { max-width: none; margin: 0; padding: 10px 22px; border-radius: 8px; display: flex; align-items: center; font-size: 27px; line-height: 1.28; }
@@ -799,7 +801,7 @@ return [d["embedding"] for d in r.json()["data"]]</pre></div></div>
     <div class="goal-side">
       <div class="stat"><b>7.4 s</b><span>Before the first word on E4B, with a prompt of about 2.4k tokens</span></div>
       <ul class="points">
-        <li class="point"><b>Evaluation Lesson</b><span>A repeated benchmark prompt reported 0.09 s from the prompt cache. The eval now sends <code>cache_prompt: false</code>.</span></li>
+        <li class="point"><b>Lesson</b><span>A repeated benchmark prompt reported 0.09 s from the prompt cache. Measure speed with <code>cache_prompt: false</code>.</span></li>
         
       </ul>
     </div>
@@ -938,7 +940,7 @@ with _db() as db:
     )
 events.emit("memory.stored", memory_id=cur.lastrowid, text=text, mem_kind=kind)
 return cur.lastrowid</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Too short</b><span class="txt">The code removes filler words such as um and okay. Fewer than 3 real words is junk.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Near copy</b><span class="txt">A <span class="term" tabindex="0" data-def="A score for how close two vectors point. Similar meanings score higher.">cosine similarity</span> of 0.95 or more to any memory is a duplicate.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Embed</b><span class="txt">EmbeddingGemma-2 makes one 768-number vector for the text.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Reject</b><span class="txt">A rejected memory leaves an event with the reason, so you can read why.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Insert</b><span class="txt">One SQLite row holds the time, kind, text, media path and vector.</span></li><li class="walk-note fail"><b>Evaluation Lesson</b><span class="txt">A strict filter loses notes, and a loose one adds noise. Measure both kinds of error.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>23 synthetic memories, 6 labeled as junk.</dd><dt>Output</dt><dd>Whether store() keeps each one.</dd><dt>Metrics</dt><dd>Junk stored: 0.0, limit 0.10.<br>Good memories rejected: 0.0, no limit.</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Too short</b><span class="txt">The code removes filler words such as um and okay. Fewer than 3 real words is junk.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Near copy</b><span class="txt">A <span class="term" tabindex="0" data-def="A score for how close two vectors point. Similar meanings score higher.">cosine similarity</span> of 0.95 or more to any memory is a duplicate.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Embed</b><span class="txt">EmbeddingGemma-2 makes one 768-number vector for the text.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Reject</b><span class="txt">A rejected memory leaves an event with the reason, so you can read why.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Insert</b><span class="txt">One SQLite row holds the time, kind, text, media path and vector.</span></li><li class="walk-note fail"><b>Lesson</b><span class="txt">A strict filter loses good notes, and a loose one stores junk. Always measure both errors.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>23 synthetic memories, 6 labeled as junk.</dd><dt>Output</dt><dd>Whether store() keeps each one.</dd><dt>Metrics</dt><dd>Junk stored: 0.0, limit 0.10.<br>Good memories rejected: 0.0, no limit.</dd></dl></li></ol>
   </div>
   
 </section>
@@ -1182,7 +1184,7 @@ return None, {"attempts": retries + 1, "tokens": used}</pre></div><div class="wa
 </section>
 
 
-<section class="slide" data-type="content" data-part="brain" data-title="Brain: tool loop">
+<section class="slide walk-long" data-type="content" data-part="brain" data-title="Brain: tool loop">
   <h2>Brain: the tool loop</h2>
   <p class="rel"><b>Called by</b> <code>dashboard/server.py, cli.py cmd_chat()</code> <b>Calls</b> <code>tools.select(), _recall(), _handle_calls()</code></p>
   <div class="walk">
@@ -1205,7 +1207,7 @@ for step in range(max_steps):
     if (text := _fixed_reply(trace, retries_left)) is not None:
         return {"text": text, **out}
 return {"text": "Stopped after too many tool steps.", **out}</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Prepare</b><span class="txt">The code picks the 5 closest tools, recalls memories, names the calls that still wait for approval, and fits the budget.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Ask</b><span class="txt">After a tool result, thinking goes on for one step. Then the code sends the request with the tool list.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Finish</b><span class="txt">A reply with no tool calls is the final text.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Run the calls</b><span class="txt">The code adds the reply to the messages, then runs each call through the permission checks.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Stop</b><span class="txt">The loop stops after too many invalid calls, or after 4 steps. A call that waits for approval also ends the turn, with text from the code: the model said "I have created the file" here.</span></li><li class="walk-note fail"><b>Lesson</b><span class="txt">With thinking off, the turn after a tool result came back empty. One passing check is no proof, so the workaround stays.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>16 synthetic prompts with the expected tool and arguments.</dd><dt>Output</dt><dd>One model step's tool call. Nothing runs.</dd><dt>Metrics</dt><dd>Right tool: 1.0, no limit.<br>Right tool and arguments: 1.0, minimum 0.80.</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Prepare</b><span class="txt">The code picks the 5 closest tools, recalls memories, names the waiting calls, and fits the budget.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Ask</b><span class="txt">After a tool result, thinking goes on for one step. Then the code sends the request with the tool list.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Finish</b><span class="txt">A reply with no tool calls is the final text.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Run the calls</b><span class="txt">The code adds the reply to the messages, then runs each call through the permission checks.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Stop</b><span class="txt">The loop stops after too many invalid calls, or after 4 steps. A call that waits for approval also ends the turn, with text from the code.</span></li><li class="walk-note fail"><b>Lesson</b><span class="txt">With thinking off, the turn after a tool result came back empty. One passing check is no proof, so the workaround stays.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>16 synthetic prompts with expected calls.</dd><dt>Output</dt><dd>One model step's tool call. Nothing runs.</dd><dt>Metrics</dt><dd>Right tool: 1.0, no limit.<br>Right tool and arguments: 1.0, minimum 0.80.</dd></dl></li></ol>
   </div>
   
 </section>
@@ -1648,7 +1650,7 @@ media: data/runtime/captures/screen-...png</pre></div>
   <h2>Run it yourself after this session</h2>
   <div class="cols" style="flex:none;gap:48px">
     <div class="stack" style="gap:28px">
-      <div class="code-wrap"><div class="code-file">README.md  from the repo root</div><pre class="code" data-lang="bash" data-match="prefix" data-src="README.md:18-21">python3 scripts/setup.py
+      <div class="code-wrap"><div class="code-file">README.md  from the repo root</div><pre class="code" data-lang="bash" data-match="prefix" data-src="README.md:19-22">python3 scripts/setup.py
 .venv/bin/python cli.py doctor
 .venv/bin/python cli.py smoke
 .venv/bin/python cli.py dashboard</pre></div>
