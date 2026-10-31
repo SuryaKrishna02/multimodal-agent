@@ -3,120 +3,213 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
 <title>Multimodal Agent</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-  <h1>Multimodal Agent <span class="muted">on-device</span></h1>
+<header id="top">
+  <div class="brand">
+    <h1>Multimodal Agent</h1>
+    <span class="tagline">Runs entirely on this device</span>
+  </div>
   <div class="status">
-    <label>Tier
-      <select id="tier"><option value="e4b">Gemma 4 E4B</option><option value="e2b">Gemma 4 E2B</option></select>
+    <label class="field" for="tier">Model
+      <select id="tier" title="Which Gemma 4 model to run. Switching restarts the language model.">
+        <option value="e4b">Gemma 4 E4B</option><option value="e2b">Gemma 4 E2B</option>
+      </select>
     </label>
-    <span id="llm-dot" class="dot"></span>LLM <span id="llm-mem" class="muted"></span>
-    <span id="emb-dot" class="dot"></span>Embed <span id="emb-mem" class="muted"></span>
-    <span class="muted">Hotkey: Ctrl+Option+Space</span>
-    <button id="mic-switch" class="mic live">Mic: ON</button>
+    <span class="stat" title="Language model server. It reads text, images and audio."><i id="llm-dot" class="dot"></i>Language model <span id="llm-mem" class="muted"></span></span>
+    <span class="stat" title="Embedding server. It powers memory search."><i id="emb-dot" class="dot"></i>Embeddings <span id="emb-mem" class="muted"></span></span>
+    <button id="mic-switch" class="mic" role="switch" aria-checked="true" title="Pause or allow the microphone everywhere. The agent only records when you press Record.">Mic ready</button>
+    <button id="chat-toggle" class="small" aria-controls="chat" title="Show or hide the chat (key C)">Hide chat</button>
   </div>
 </header>
 
+<div id="banners"><div id="approval-banner" role="alert" hidden></div></div>
+<div id="notices" role="status"></div>
+
 <main>
-  <section id="left">
-    <div class="card grow">
-      <h2>Chat</h2>
-      <div id="chat-log"></div>
-      <form id="chat-form">
-        <input id="chat-input" placeholder="Ask anything..." autocomplete="off">
-        <label class="inline"><input type="checkbox" id="chat-screen"> + screen</label>
-        <button>Send</button>
-      </form>
-    </div>
-    <div class="card grow">
-      <h2>Event log <input id="event-filter" placeholder="filter (e.g. brain)"></h2>
-      <div id="event-log"></div>
-    </div>
-  </section>
-
-  <section id="right">
-    <nav id="tabs">
-      <button data-tab="serving">1 Serving</button>
-      <button data-tab="senses">2 Senses</button>
-      <button data-tab="brain">3 Brain</button>
-      <button data-tab="memory">4 Memory</button>
-      <button data-tab="tools">5 Tools</button>
-      <button data-tab="tasks">6 Tasks</button>
-      <button data-tab="scorecard">7 Scorecard</button>
-    </nav>
-
-    <div class="panel" id="panel-serving">
-      <div class="card"><h2>Servers</h2><div id="serving-info"></div>
-        <button id="bench-btn">Run benchmark</button></div>
-      <div class="card"><h2>Benchmarks this session</h2>
-        <table id="bench-table"><thead><tr><th>tier</th><th>time to first token</th><th>gen tok/s</th>
-          <th>prompt tok/s</th><th>llm memory</th></tr></thead><tbody></tbody></table></div>
+  <section id="content">
+    <div id="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="serving"><span class="tab-title"><kbd>1</kbd>Serving<i class="ping" data-activity="serving"></i></span><span class="tab-sub">Local models</span></button>
+      <button role="tab" data-tab="senses"><span class="tab-title"><kbd>2</kbd>Senses<i class="ping" data-activity="senses"></i></span><span class="tab-sub">Hear and see</span></button>
+      <button role="tab" data-tab="brain"><span class="tab-title"><kbd>3</kbd>Brain<i class="ping" data-activity="brain"></i></span><span class="tab-sub">Inside a request</span></button>
+      <button role="tab" data-tab="memory"><span class="tab-title"><kbd>4</kbd>Memory<i class="ping" data-activity="memory"></i></span><span class="tab-sub">What it recalls</span></button>
+      <button role="tab" data-tab="tools"><span class="tab-title"><kbd>5</kbd>Tools<i class="ping" data-activity="tools"></i><span id="tools-badge" class="badge" hidden></span></span><span class="tab-sub">What it can do</span></button>
+      <button role="tab" data-tab="tasks"><span class="tab-title"><kbd>6</kbd>Tasks<i class="ping" data-activity="tasks"></i></span><span class="tab-sub">Run the agent</span></button>
+      <button role="tab" data-tab="scorecard"><span class="tab-title"><kbd>7</kbd>Scorecard</span><span class="tab-sub">How well it works</span></button>
     </div>
 
-    <div class="panel" id="panel-senses">
-      <div class="card"><h2>Hearing: speech segments and chunks (each chunk &lt; 30 s)</h2>
-        <div class="row"><button id="rec-btn">Record voice note</button>
-          <label class="file">Use WAV file<input type="file" id="wav-file" accept="audio/*"></label></div>
-        <svg id="timeline" viewBox="0 0 1000 90" preserveAspectRatio="none"></svg>
-        <div id="audio-info" class="muted"></div></div>
-      <div class="card"><h2>Seeing: last screenshot</h2>
-        <div class="row"><button id="look-btn2">Capture + help (Task 2)</button></div>
-        <div id="screen-warning" class="warn"></div>
-        <img id="last-screen" alt=""></div>
-      <div class="card"><h2>Seeing over time: last screen video</h2>
-        <div id="video-info" class="muted">No video yet. One input_video part; llama-server samples it at 1 fps with ffmpeg.</div>
-        <video id="last-video" controls muted></video></div>
+    <div class="panel" id="panel-serving" role="tabpanel">
+      <div class="page-head"><h2>Serving</h2>
+        <p>Two local servers do the model work: a language model that reads text, images and audio, and an embedding
+          model that powers memory search. Nothing leaves this machine.</p></div>
+
+      <div class="card"><h3>How a message moves through the agent</h3>
+        <p class="hint">Each box is a tab. A box lights up while that part of the agent is working.</p>
+        <ol class="flow">
+          <li><button data-go="senses"><b>Senses</b><span>Hears and sees</span><i class="ping" data-activity="senses"></i></button></li>
+          <li><button data-go="memory"><b>Memory</b><span>Finds related notes</span><i class="ping" data-activity="memory"></i></button></li>
+          <li><button data-go="brain"><b>Brain</b><span>Builds the request</span><i class="ping" data-activity="brain"></i></button></li>
+          <li><button data-go="serving"><b>Serving</b><span>Gemma 4 replies</span><i class="ping" data-activity="serving"></i></button></li>
+          <li><button data-go="tools"><b>Tools</b><span>Run if allowed</span><i class="ping" data-activity="tools"></i></button></li>
+        </ol>
+        <p class="hint flow-note">When the model asks for a tool, the result goes back to the Brain and the model runs again.</p>
+      </div>
+
+      <div class="card"><h3>Servers</h3>
+        <div id="serving-info" class="servers"></div>
+        <p class="hint">E2B is the smaller model: it uses less memory and replies faster. E4B is larger. Switch with the Model menu at the top.
+          The memory number can drop while the model is idle, because the operating system can page out the model file. That is normal.</p>
+        <details class="more" id="serving-cmd" hidden><summary>How the servers were started</summary><div id="serving-cmd-body"></div></details>
+      </div>
+
+      <div class="card"><h3>Speed test <button id="bench-btn" class="primary small head-action" data-busy="Measuring…">Run benchmark</button></h3>
+        <p class="hint">Sends one fixed prompt to the language model and measures how fast the reply comes back.</p>
+        <div id="bench-latest" class="tiles"></div>
+        <div class="table-wrap"><table id="bench-table"><thead><tr><th>Time</th><th>Model</th><th class="num">First token</th>
+          <th class="num">Writing speed</th><th class="num">Reading speed</th><th class="num">Memory</th></tr></thead><tbody></tbody></table></div>
+        <div class="empty-note">No benchmarks yet. Press "Run benchmark".</div></div>
     </div>
 
-    <div class="panel" id="panel-brain">
-      <div class="card"><h2>Context budget (estimated tokens)</h2><div id="budget"></div></div>
-      <div class="card"><h2>Exact request sent to the model <span class="muted">(media shortened)</span></h2>
-        <pre id="last-request" class="tall">No request yet.</pre></div>
-      <div class="card"><h2>Reply</h2><pre id="last-reply" class="short"></pre></div>
+    <div class="panel" id="panel-senses" role="tabpanel">
+      <div class="page-head"><h2>Senses</h2>
+        <p>What the agent hears and sees, before the model gets it. Long audio is cut into chunks, because Gemma takes at most 30 s of audio at a time.</p></div>
+      <div class="card"><h3>Hearing</h3>
+        <p class="hint">Record or upload audio to see which parts count as speech, and how they are cut into chunks.</p>
+        <div class="row"><button id="rec-btn" class="primary">Record voice note</button>
+          <label class="file">Upload audio file<input type="file" id="wav-file" accept="audio/*"></label></div>
+        <div id="timeline"></div>
+      </div>
+      <div class="card"><h3>Seeing</h3>
+        <p class="hint">The exact picture or video the model received last.</p>
+        <div class="row"><button id="look-btn2">Capture screen and get help</button></div>
+        <div class="media-pair">
+          <figure><figcaption><b>Last screenshot</b> <span id="screen-info" class="muted"></span></figcaption>
+            <div id="last-screen" class="media-slot" data-empty="No screenshot yet."></div></figure>
+          <figure><figcaption><b>Last screen video</b> <span id="video-info" class="muted"></span></figcaption>
+            <div id="last-video" class="media-slot" data-empty="No video yet."></div></figure>
+        </div>
+        <p class="hint">A video goes to the model as one input, and llama-server samples it at 1 frame per second. The answer appears in the Tasks tab.</p>
+      </div>
     </div>
 
-    <div class="panel" id="panel-memory">
-      <div class="card"><h2>Search</h2>
-        <form id="mem-form" class="row"><input id="mem-q" placeholder="e.g. what do I need to do tomorrow?">
-          <button>Search top 5</button></form>
-        <table id="mem-hits"><tbody></tbody></table></div>
-      <div class="card"><h2>Rejected by the junk filter</h2><table id="mem-rejected"><tbody></tbody></table></div>
-      <div class="card grow"><h2>All memories <button id="mem-clear" class="small danger">clear</button></h2>
-        <table id="mem-all"><thead><tr><th>id</th><th>when</th><th>kind</th><th>text</th></tr></thead>
-          <tbody></tbody></table></div>
+    <div class="panel" id="panel-brain" role="tabpanel">
+      <div class="page-head"><h2>Brain</h2>
+        <p>Everything the agent did for one message: what it looked up, how it spent the context, the exact request and the reply.</p></div>
+      <div id="brain-empty" class="card empty-card"><b>Nothing to show yet</b><p>Send a message in the chat, and this page fills in.</p></div>
+      <div id="brain-body" hidden>
+        <div class="card"><div class="turn-head"><h3>What happened</h3>
+            <div class="turn-nav"><button id="turn-prev" class="small" aria-label="Earlier message">‹ Earlier</button>
+              <span id="turn-pos" class="muted"></span>
+              <button id="turn-next" class="small" aria-label="Later message">Later ›</button></div></div>
+          <p id="turn-title" class="turn-title"></p>
+          <ol id="turn-steps" class="steps"></ol></div>
+        <div class="card"><h3>Context budget</h3>
+          <p class="hint">The model has a fixed amount of room. This is how much the message used, and what filled it.</p>
+          <div id="budget"></div></div>
+        <div class="card"><h3>Request sent to the model <span id="req-label" class="muted"></span></h3>
+          <div id="last-request"></div></div>
+        <div class="card"><h3>Reply from the model</h3><div id="last-reply"></div></div>
+      </div>
     </div>
 
-    <div class="panel" id="panel-tools">
-      <div class="card"><h2>Waiting for your approval</h2><div id="pending">Nothing pending.</div></div>
-      <div class="card"><h2>Registered tools and permission tiers</h2><table id="tool-list"><tbody></tbody></table></div>
-      <div class="card grow"><h2>Recent calls</h2><table id="tool-calls"><thead><tr><th>tool</th><th>args</th>
-        <th>status</th><th>result / reason</th></tr></thead><tbody></tbody></table></div>
+    <div class="panel" id="panel-memory" role="tabpanel">
+      <div class="page-head"><h2>Memory</h2>
+        <p>Long-term notes the agent can recall later. It searches by meaning, so the words do not have to match.</p></div>
+      <div class="card"><h3>Search by meaning</h3>
+        <form id="mem-form" class="row"><input id="mem-q" aria-label="Search memories" placeholder="For example: what do I need to do tomorrow?">
+          <button class="primary">Search</button></form>
+        <div id="mem-hits"></div></div>
+      <div class="card"><h3><span>All memories <span id="mem-count" class="muted"></span></span><button id="mem-clear" class="small danger head-action">Clear all</button></h3>
+        <div id="mem-all"></div></div>
+      <div class="card"><h3>Refused by the junk filter</h3>
+        <p class="hint">Things the agent chose not to keep, with the reason.</p>
+        <div id="mem-rejected"></div></div>
     </div>
 
-    <div class="panel" id="panel-tasks">
-      <div class="card"><h2>Task 1: voice note to action items</h2>
-        <div class="row"><button id="rec-btn2">Record voice note</button>
-          <label class="file">Use WAV file<input type="file" id="wav-file2" accept="audio/*"></label></div>
+    <div class="panel" id="panel-tools" role="tabpanel">
+      <div class="page-head"><h2>Tools</h2>
+        <p>Actions the agent can take. The model never decides permissions: every call goes through the same three checks first.</p></div>
+      <div class="card"><h3>What happens when the model asks for a tool</h3>
+        <ol class="flow gates">
+          <li><div><b>Schema</b><span>Are the arguments valid?</span></div></li>
+          <li><div><b>Permission</b><span>What tier is this tool?</span></div></li>
+          <li><div><b>Guard</b><span>Is this exact call unsafe?</span></div></li>
+          <li><div class="gate-out"><b>Outcome</b><span><span class="tag safe">safe</span> runs<br><span class="tag confirm">confirm</span> waits for you<br><span class="tag blocked">blocked</span> never runs</span></div></li>
+        </ol></div>
+      <div class="card"><h3>Recent calls</h3>
+        <div class="table-wrap scroll-y"><table id="tool-calls"><thead><tr><th>Time</th><th>Tool</th><th>Arguments</th>
+          <th>Status</th><th>Result or reason</th></tr></thead><tbody></tbody></table></div>
+        <div class="empty-note">No tool calls yet. Try asking the chat "What time is it?".</div></div>
+      <div class="card"><h3>Available tools</h3>
+        <p class="hint"><span class="tag plain">guarded</span> means an extra check also reads the arguments of each call.</p>
+        <div class="table-wrap"><table id="tool-list"><thead class="sr-only"><tr><th>Tool</th><th>Checks</th><th>What it does</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+
+    <div class="panel" id="panel-tasks" role="tabpanel">
+      <div class="page-head"><h2>Tasks</h2><p>The two jobs this agent is built to do. Everything on the other tabs comes together here.</p></div>
+      <div class="card"><h3>Task 1: voice note to action items</h3>
+        <p class="hint">Speak, stop, and get a transcript with a list of what to do. Both are saved to memory.</p>
+        <div class="row"><button id="rec-btn2" class="primary">Record voice note</button>
+          <label class="file">Upload audio file<input type="file" id="wav-file2" accept="audio/*"></label></div>
         <div id="task1-out" class="result"></div></div>
-      <div class="card"><h2>Task 2: look at my screen and help</h2>
-        <div class="row"><button id="look-btn">Capture screen now</button>
-          <label class="file">Use screenshot<input type="file" id="img-file" accept="image/*"></label>
-          <button id="watch-btn">Record 10 s video + help</button>
-          <label class="file">Use video<input type="file" id="video-file" accept="video/*"></label></div>
+      <div class="card"><h3>Task 2: look at my screen and help</h3>
+        <p class="hint">The agent says what it sees and suggests a fix if something is wrong.</p>
+        <div class="row"><button id="look-btn" class="primary">Capture screen now</button>
+          <button id="watch-btn" data-busy="Recording…">Record 10 s video</button>
+          <span class="row-sep" aria-hidden="true"></span>
+          <label class="file">Upload screenshot<input type="file" id="img-file" accept="image/*"></label>
+          <label class="file">Upload video<input type="file" id="video-file" accept="video/*"></label></div>
+        <p id="hotkey-tip" class="tip" hidden></p>
         <div id="task2-out" class="result"></div></div>
     </div>
 
-    <div class="panel" id="panel-scorecard">
-      <div class="card grow"><h2>Scorecard <button id="score-refresh" class="small">refresh</button></h2>
-        <table id="scorecard"><thead><tr><th>level</th><th>component</th><th>metric</th><th>threshold</th>
-          <th>any</th><th>E4B</th><th>E2B</th><th></th></tr></thead><tbody></tbody></table></div>
-      <div class="card"><h2>Live eval item</h2><div id="live-out" class="muted">Press "run 1 live" on a row.</div></div>
+    <div class="panel" id="panel-scorecard" role="tabpanel">
+      <div class="page-head"><h2>Scorecard</h2>
+        <p>Quality checks for each part of the agent, from the last run. Run them with <code>python cli.py evals --run</code>, then press Refresh. Open a row to see its numbers.</p></div>
+      <div id="score-summary" class="card"></div>
+      <div class="card"><h3><span>Results</span><span class="head-action"><button id="score-expand" class="small">Open all</button> <button id="score-refresh" class="small">Refresh</button></span></h3>
+        <p class="hint">In each small bar, the blue length is the result and the black tick is the target.</p>
+        <div id="score-list"></div></div>
     </div>
   </section>
+
+  <aside id="chat" aria-label="Chat">
+    <div class="chat-head"><h2>Chat</h2><button id="chat-new" class="small" hidden title="Forget this conversation. Long-term memories stay.">New chat</button></div>
+    <div id="chat-empty">
+      <p>Ask anything. The agent can use tools and remember things. Try one of these:</p>
+      <div class="suggest">
+        <button type="button" data-suggest="What time is it?">What time is it?</button>
+        <button type="button" data-suggest="What do I need to do tomorrow?">What do I need to do tomorrow?</button>
+        <button type="button" data-suggest="Remember that I have a dentist appointment next Tuesday at 3pm">Remember that I have a dentist appointment…</button>
+      </div>
+    </div>
+    <div id="chat-log" aria-live="polite"></div>
+    <form id="chat-form">
+      <input id="chat-input" aria-label="Message" placeholder="Ask anything…" autocomplete="off">
+      <label class="with-screen" title="Send one screenshot with this message"><input type="checkbox" id="chat-screen"> Include my screen</label>
+      <button class="primary" data-busy="Sending…">Send</button>
+    </form>
+  </aside>
 </main>
+
+<div id="drawer">
+  <button id="drawer-bar" aria-expanded="false" aria-controls="drawer-body">
+    <strong>Activity</strong><span class="latest" id="latest-event">Waiting for events…</span><span class="chev" aria-hidden="true">▲</span>
+  </button>
+  <div id="drawer-body">
+    <div id="drawer-tools">
+      <div id="event-chips" role="group" aria-label="Show events from"></div>
+      <input id="event-filter" aria-label="Filter events" placeholder="Filter by text">
+    </div>
+    <div id="event-log"></div>
+  </div>
+</div>
+
+<dialog id="lightbox" aria-label="Enlarged image"><img alt=""></dialog>
+<output id="toast"></output>
 <script src="/static/app.js"></script>
 </body>
 </html>

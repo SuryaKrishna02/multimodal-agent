@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
@@ -62,6 +62,20 @@ async def no_cache(request: Request, call_next):
     return response
 
 
+@app.exception_handler(Exception)
+async def show_error(_request: Request, error: Exception):
+    """Send the reason for an unexpected failure to the page, so it can show more than "Internal Server Error".
+
+    Args:
+        _request (Request): The request that failed, not used.
+        error (Exception): The failure.
+
+    Returns:
+        JSONResponse: Status 500 with the message in `detail`.
+    """
+    return JSONResponse({"detail": f"{type(error).__name__}: {error}"}, status_code=500)
+
+
 @app.get("/")
 def index():
     """Serve the dashboard page."""
@@ -73,12 +87,15 @@ def get_state():
     """Report the state of the servers, the microphone and pending tool approvals.
 
     Returns:
-        dict: `tier`, `llm` and `embed` health, server memory in GB, `mic_paused`, `recording` and `pending` calls.
+        dict: `tier`, `llm` and `embed` health, their ports, server memory in GB, `mic_paused`, `recording` and
+            `pending` calls.
     """
     return {
         "tier": state["tier"],
         "llm": llm.healthy(),
         "embed": emb.healthy(),
+        "llm_port": config.LLM_PORT,
+        "embed_port": config.EMBED_PORT,
         "llm_rss_gb": round(llm.rss_gb(), 2),
         "embed_rss_gb": round(emb.rss_gb(), 2),
         "mic_paused": audio.Mic.paused,
@@ -134,6 +151,27 @@ def bench():
 
 
 # --- Chat ----------------------------------------------------------------------
+
+
+@app.get("/api/chat")
+def chat_history():
+    """List the chat so far, so a page reload shows the same conversation the model still has.
+
+    Returns:
+        list[dict]: Messages with `role` and `content`, oldest first.
+    """
+    return state["history"]
+
+
+@app.post("/api/chat/clear")
+def chat_clear():
+    """Start a new chat. Long-term memories stay.
+
+    Returns:
+        list: An empty list.
+    """
+    state["history"] = []
+    return []
 
 
 @app.post("/api/chat")

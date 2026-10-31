@@ -56,7 +56,7 @@ def store(text: str, kind: str = "note", meta: dict | None = None, media: str | 
             "INSERT INTO memories (ts, kind, text, meta, media, embedding) VALUES (?,?,?,?,?,?)",
             (time.time(), kind, text, json.dumps(meta or {}), media, vec.tobytes()),
         )
-    events.emit("memory.stored", id=cur.lastrowid, text=text, mem_kind=kind)
+    events.emit("memory.stored", memory_id=cur.lastrowid, text=text, mem_kind=kind)
     return cur.lastrowid
 
 

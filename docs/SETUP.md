@@ -62,7 +62,9 @@ Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code,
 
 The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 7
 follow the session agenda: Serving, Senses, Brain, Memory, Tools, Tasks, Scorecard.
-Press the number keys to switch tabs.
+Press the number keys to switch tabs. The page is light only. The chat sits on the right (press C to hide it and give
+the tabs more room), a bar at the bottom opens the Activity log (the event log), and a banner appears on every tab when
+a tool call waits for your approval. A dot on a tab lights up while that part of the agent is working.
 
 Without the dashboard:
 

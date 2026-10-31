@@ -20,7 +20,8 @@ def emit(kind: str, **data) -> dict:
     """Record one event. `kind` is a dotted name, e.g. "senses.audio" or "brain.request"."""
     global _next_id
     with _lock:
-        event = {"id": _next_id, "ts": time.time(), "kind": kind, **data}
+        # The log's own fields go last: pollers page by `id`, so a payload must never replace it.
+        event = {**data, "id": _next_id, "ts": time.time(), "kind": kind}
         _next_id += 1
         _events.append(event)
     config.RUNTIME.mkdir(parents=True, exist_ok=True)
