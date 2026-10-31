@@ -58,6 +58,13 @@ h1 { font-size: 18px; font-weight: 650; margin: 0; letter-spacing: -.01em; white
 .ask-title strong { color: var(--warn); margin-right: 6px; }
 .ask-actions { display: flex; gap: 8px; }
 .ask-args { grid-column: 1 / -1; }
+.ask-note { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--warn); }
+/* The chat panel is narrow and scrolls its own log, so the approval sits above the input and stays in view. */
+#chat-approvals { flex-shrink: 0; max-height: 50%; overflow: auto; padding: 12px 14px; background: var(--warn-soft); border-top: 1px solid var(--warn-line); }
+#chat-approvals .ask { grid-template-columns: minmax(0, 1fr); }
+#chat-approvals .ask-actions { order: 1; }
+/* Beside the page, the chat panel holds the approval. Below 1000px the chat stacks under the page, so the banner stays. */
+@media (min-width: 1001px) { body:not(.chat-hidden) #approval-banner { display: none; } }
 .arg { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 4px; }
 .arg b { font: 600 12.5px/1.9 var(--mono); }
 .arg pre { background: var(--card); border-color: var(--warn-line); padding: 4px 10px; max-height: 180px; }
@@ -134,6 +141,7 @@ button.danger { color: var(--bad); border-color: #efc4be; }
 button.danger:hover { background: var(--bad-soft); border-color: var(--bad); }
 button.small { padding: 3px 10px; font-size: 13px; }
 button:disabled, .file.is-busy { opacity: .55; cursor: progress; }
+#chat-clear:disabled:not(.is-busy) { cursor: not-allowed; }
 .file { display: inline-block; position: relative; }
 .is-busy { pointer-events: none; }
 .file input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

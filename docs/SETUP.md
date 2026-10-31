@@ -63,8 +63,15 @@ Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code,
 The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 7
 follow the session agenda: Serving, Senses, Brain, Memory, Tools, Tasks, Scorecard.
 Press the number keys to switch tabs. The page is light only. The chat sits on the right (press C to hide it and give
-the tabs more room), a bar at the bottom opens the Activity log (the event log), and a banner appears on every tab when
-a tool call waits for your approval. A dot on a tab lights up while that part of the agent is working.
+the tabs more room), and a bar at the bottom opens the Activity log (the event log). When a tool call waits for your
+approval, Approve and Deny appear in the chat, above the message box. With the chat hidden or on a narrow window, they
+appear in a banner at the top instead. A dot on a tab lights up while that part of the agent is working.
+After you decide, the chat history holds the outcome, so you can ask the model "did that work?"
+
+If a model server stops unexpectedly, the dashboard restarts it on the current tier. `data/runtime/llama-llm.previous.log`
+or `llama-embed.previous.log` keeps the log of the server that stopped. The dashboard does not restart a server that
+`python cli.py stop` stopped: the next dashboard start or `python cli.py serve` starts it again. Until then, the header
+says "starting…".
 
 Without the dashboard:
 

@@ -177,7 +177,7 @@
   </section>
 
   <aside id="chat" aria-label="Chat">
-    <div class="chat-head"><h2>Chat</h2><button id="chat-new" class="small" hidden title="Forget this conversation. Long-term memories stay.">New chat</button></div>
+    <div class="chat-head"><h2>Chat</h2><button id="chat-clear" class="small" disabled title="Forget this conversation. Long-term memories stay." data-busy="Clearing…">Clear chat</button></div>
     <div id="chat-empty">
       <p>Ask anything. The agent can use tools and remember things. Try one of these:</p>
       <div class="suggest">
@@ -187,6 +187,7 @@
       </div>
     </div>
     <div id="chat-log" aria-live="polite"></div>
+    <div id="chat-approvals" role="alert" hidden></div>
     <form id="chat-form">
       <input id="chat-input" aria-label="Message" placeholder="Ask anything…" autocomplete="off">
       <label class="with-screen" title="Send one screenshot with this message"><input type="checkbox" id="chat-screen"> Include my screen</label>

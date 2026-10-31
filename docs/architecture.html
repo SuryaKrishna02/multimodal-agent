@@ -133,7 +133,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
 <rect class="box teal" x="238" y="196" width="144" height="88" rx="9"/>
 <text class="title" x="250" y="218">screen.py</text>
 <text class="sub" x="250" y="238">downscale ≤ 1280 px</text>
-<text class="sub" x="250" y="255">change sampler</text>
+<text class="sub" x="250" y="255">flat image check</text>
 <rect class="box teal" x="400" y="196" width="144" height="88" rx="9"/>
 <text class="title" x="412" y="218">video.py</text>
 <text class="sub" x="412" y="238">clip, shrink 640 px</text>
@@ -340,6 +340,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
   <ol class="flow">
     <li>A sense produces raw input: a 16 kHz float array, a PIL image or a video file.</li>
     <li><code>brain.part()</code> turns it into an OpenAI-style content part (base64 WAV, PNG or MP4).</li>
+    <li>The dashboard watches both model servers. It restarts a server whose process stops, on the current tier, unless <code>cli.py stop</code> stopped it.</li>
     <li>For a chat turn, <code>brain.respond()</code> calls <code>tools.select()</code>. It embeds the request with the embedding server and ranks every
     tool by its description plus example requests. Only the top 5 tool schemas go into the request. If the embedding server is down, the first 5 registered tools are used.</li>
     <li><code>brain.fit_budget()</code> adds the system prompt, the top 3 memories and the tool schemas. It estimates tokens: audio at 25 per second,
@@ -347,7 +348,7 @@ code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--g
     If the request does not fit, it drops the oldest history first, then the memories.</li>
     <li><code>brain.send()</code> writes the exact request to <code>data/runtime/last_request.json</code>, logs it to the event log, and posts it to llama-server.</li>
     <li>A reply with <code>tool_calls</code> goes through <code>tools.run()</code>: schema check, tier, guard, execute. The result returns to the model as a <code>tool</code> message and the loop runs again, with thinking turned on from the second step
-    (a Gemma 4 quirk: with thinking off, the reply after a tool result comes back empty). A <code>confirm</code> call returns <code>pending</code> until the user approves it in the dashboard.
+    (a Gemma 4 quirk: with thinking off, the reply after a tool result comes back empty). A <code>confirm</code> call returns <code>pending</code> and ends the turn with a reply that the code writes, because the model claimed the call was done. While it waits, the system prompt names it. The model does not reply when the user decides. The dashboard adds the outcome (<code>brain.approval_note()</code>) to the chat history, so the next request tells the model what happened.
     A <code>blocked</code> call never runs. When the retries for invalid calls run out, the loop stops and says so.</li>
   </ol>
 </main>

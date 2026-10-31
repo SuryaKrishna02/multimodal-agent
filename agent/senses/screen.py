@@ -1,8 +1,8 @@
-"""Seeing: screen capture and sampling.
+"""Seeing: screen capture and a change sampler.
 
-Gemma 4 in llama.cpp takes images, not video. So "seeing the screen" means picking
-which frames to send. The sampler looks every SCREEN_SAMPLE_EVERY_S seconds and keeps
-a frame only when enough of the screen changed. Fewer frames = fewer tokens.
+`capture()` takes the screenshot for one request. Video has its own path in `video.py`.
+`Sampler` keeps a frame only when enough of the screen changed. No task uses it yet:
+today only the screen eval runs it.
 """
 
 import json

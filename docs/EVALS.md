@@ -64,8 +64,8 @@ python cli.py evals add query "where did I park" --relevant u001
 
 # Speech: record a clip, then give the transcript
 python cli.py record-clip clip.wav
-python cli.py evals add asr clip.wav --text "Please send the report to Priya"
-python cli.py evals add task1 note.wav --item "Send the report to Priya" --item "Book a room"
+python cli.py evals add asr clip.wav --text "Please send the report to John Doe"
+python cli.py evals add task1 note.wav --item "Send the report to John Doe" --item "Book a room"
 python cli.py evals add vad clip.wav --speech 1.2 4.8 --speech 7.0 9.5      # no --speech: no speech in the clip
 
 # Screen: a screenshot or video, and what a correct answer must mention

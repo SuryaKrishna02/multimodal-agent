@@ -251,6 +251,7 @@ const DESCRIBE = {
   "serving.start": (e) => `Starting the ${serverName(e.server)}`,
   "serving.ready": (e) => `The ${serverName(e.server)} is ready${e.load_s ? ` (loaded in ${e.load_s} s)` : ""}`,
   "serving.stop": (e) => `Stopped the ${serverName(e.server)}`,
+  "serving.restart": (e) => `The ${serverName(e.server)} stopped unexpectedly. Restarting it`,
   "serving.error": (e) => `A model server failed: ${e.message}`,
   "serving.bench": (e) => `Benchmark on ${tierName(e.tier)}: ${e.gen_tok_s?.toFixed(1)} tokens/s, first token in ${e.ttft_s?.toFixed(2)} s`,
   "senses.mic": (e) => `Microphone ${e.state}${e.seconds ? ` after ${e.seconds} s` : ""}${e.device ? ` (${e.device})` : ""}`,
@@ -609,15 +610,18 @@ function renderReply(reply) {
 }
 
 // --- Chat -------------------------------------------------------------------
+// Clear stays visible, so people can find it. It is off when there is nothing to clear, and while a reply
+// is on its way, because the server would add that reply to the conversation that was just cleared.
+const syncChatClear = () => { $("#chat-clear").disabled = !!chatPending || !$("#chat-log").children.length; };
 function addMsg(cls, html) {
   $("#chat-empty").hidden = true;
-  $("#chat-new").hidden = false;
   const log = $("#chat-log");
   log.insertAdjacentHTML("beforeend", `<div class="msg ${cls}">${html}</div>`);
   log.scrollTop = log.scrollHeight;
+  syncChatClear();
   return log.lastElementChild;
 }
-const callChip = (c) => `<span class="chip ${c.status === "ok" ? "ok" : c.status === "pending" ? "pending" : "bad"}">${esc(c.tool)} · ${esc(c.status === "pending" ? "needs your approval" : c.status)}</span>`;
+const callChip = (c) => `<span class="chip ${c.status === "ok" ? "ok" : c.status === "pending" ? "pending" : "bad"}"${c.call_id ? ` data-call-id="${c.call_id}"` : ""}>${esc(c.tool)} · ${esc(c.status === "pending" ? "needs your approval" : c.status)}</span>`;
 
 // What the agent is doing now, shown in the reply bubble while the model works.
 let chatPending = null;
@@ -640,26 +644,31 @@ $("#chat-form").onsubmit = async (e) => {
   reply.dataset.step = withScreen ? "Capturing your screen…" : "Thinking…";
   working(reply, "Thinking…");
   chatPending = reply;
+  syncChatClear();
   const t0 = Date.now();
   const out = await busy(e.submitter ?? $("#chat-form button"), () => api("/api/chat", { text, with_screen: withScreen }));
   chatPending = null;
+  syncChatClear();
   $("#chat-input").focus();
   if (!out) { reply.className = "msg agent error"; reply.textContent = "No reply: the request failed."; return; }
   const calls = out.tool_calls.map(callChip).join("");
   reply.innerHTML = `${md(out.text)}${calls ? `<div class="calls">${calls}</div>` : ""}<div class="msg-meta">${((Date.now() - t0) / 1000).toFixed(1)} s</div>`;
   $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
 };
-$("#chat-new").onclick = (e) => busy(e.target, async () => {
+$("#chat-clear").onclick = (e) => busy(e.target, async () => {
   await api("/api/chat/clear", {});
   $("#chat-log").innerHTML = "";
   $("#chat-empty").hidden = false;
-  e.target.hidden = true;
-});
+  toast("Chat cleared. Long-term memories stay.");
+}).finally(syncChatClear);
 // The server keeps the conversation over a reload, so show the same one the model still has.
 async function loadChat() {
   let history;
   try { history = await api("/api/chat"); } catch { return; }
-  for (const m of history) addMsg(m.role === "user" ? "user" : "agent", m.role === "user" ? esc(m.content) : md(m.content));
+  for (const m of history) {
+    if (m.approval) addApprovalMsg(m.approval.tool, m.approval);
+    else addMsg(m.role === "user" ? "user" : "agent", m.role === "user" ? esc(m.content) : md(m.content));
+  }
 }
 
 // --- Tasks ------------------------------------------------------------------
@@ -712,7 +721,12 @@ function renderTask1(e) {
     <h4>Transcript</h4><p>${esc(e.transcript)}</p>`;
 }
 function renderTask2(e) {
-  const shown = e.video ? `<video controls muted src="${esc(media(e.video))}"></video>` : zoomable(e.screenshot, "Screen that was analysed");
+  // An uploaded video sends no senses.video event, so the Seeing card gets it from here. A recording keeps its details.
+  if (e.video && !$("#last-video video")?.src.endsWith(encodeURIComponent(e.video))) {
+    $("#last-video").innerHTML = `<video controls muted src="${esc(media(e.video))}"></video>`;
+    $("#video-info").textContent = `Uploaded · ${clock(e.ts)}`;
+  }
+  const shown =e.video ? `<video controls muted src="${esc(media(e.video))}"></video>` : zoomable(e.screenshot, "Screen that was analysed");
   const tries = e.attempts > 1 ? ` · the model needed ${e.attempts} tries to write valid JSON` : "";
   const problem = e.problem
     ? `<div class="callout warn"><h4>Problem</h4><p>${esc(e.problem)}</p></div>`
@@ -791,21 +805,52 @@ function renderPending(pending) {
   if (key === pendingKey) return;   // do not rebuild the buttons while someone is about to click one
   pendingKey = key;
   const args = (a) => Object.entries(a || {}).map(([k, v]) => `<div class="arg"><b>${esc(k)}</b><pre>${esc(typeof v === "string" ? v : json(v))}</pre></div>`).join("");
-  $("#approval-banner").innerHTML = pending.map((p) => `<div class="ask">
+  const html = pending.map((p) => `<div class="ask">
     <div class="ask-title"><strong>Approval needed</strong>The agent wants to run <b>${esc(p.tool)}</b></div>
     <div class="ask-actions"><button class="primary small" data-decide="${p.call_id}" data-yes="1">Approve</button>
       <button class="danger small" data-decide="${p.call_id}">Deny</button></div>
-    <div class="ask-args">${args(p.args)}</div></div>`).join("");
-  $("#approval-banner").hidden = !pending.length;
+    <div class="ask-args">${args(p.args)}</div>
+    <p class="ask-note">Not done yet. Nothing runs until you press Approve.</p></div>`).join("");
+  // CSS shows one of these: the chat panel, or the banner when the chat is out of view.
+  for (const id of ["#chat-approvals", "#approval-banner"]) {
+    $(id).innerHTML = html;
+    $(id).hidden = !pending.length;
+  }
   $("#tools-badge").hidden = !pending.length;
   $("#tools-badge").textContent = pending.length;
+}
+const approvalChip = (tool, out) => {
+  const label = { ok: "approved", denied: "denied" }[out.status] || out.status;
+  return `<span class="chip ${out.status === "ok" ? "ok" : "bad"}">${esc(tool)} · ${esc(label)}</span>`;
+};
+const approvalDetail = (out) => (out.status === "denied" ? "Nothing was run." : out.status === "ok" ? resultText(out.result) || "Finished with no output." : resultText(out.error));
+const addApprovalMsg = (tool, out) => addMsg("agent", `<div class="calls">${approvalChip(tool, out)}</div><div class="msg-meta">${esc(approvalDetail(out))}</div>`);
+// The chat has to show what happened after a decision, because the model does not reply again until the next message.
+// The outcome replaces the "needs your approval" chip in the reply that asked. After a reload that chip is gone,
+// so the outcome gets its own message, from the chat history that the server keeps for the model.
+function showApprovalOutcome(callId, tool, out) {
+  const chip = approvalChip(tool, out);
+  const detail = approvalDetail(out);
+  const waiting = $(`[data-call-id="${callId}"]`);
+  if (!waiting) { addApprovalMsg(tool, out); return; }
+  const calls = waiting.parentElement;
+  const who = calls.children.length > 1 ? `${tool}: ` : "";   // several calls in one reply: say which one this is
+  waiting.outerHTML = chip;
+  calls.insertAdjacentHTML("afterend", `<div class="msg-meta">${esc(who + detail)}</div>`);
+  $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-decide]");
   if (!b) return;
   const yes = !!b.dataset.yes;
-  const out = await busy(b, () => api("/api/tools/approve", { call_id: Number(b.dataset.decide), yes }));
-  if (out) toast(yes ? "Approved." : "Denied.");
+  const callId = Number(b.dataset.decide);
+  const tool = appState?.pending.find((p) => p.call_id === callId)?.tool ?? "Tool";
+  b.closest(".ask").querySelectorAll("button").forEach((x) => (x.disabled = true));   // one decision per call
+  const out = await busy(b, () => api("/api/tools/approve", { call_id: callId, yes }));
+  if (out) {
+    toast(yes ? "Approved." : "Denied.");
+    showApprovalOutcome(callId, tool, out);
+  }
   pendingKey = "";
   refreshState();
 });

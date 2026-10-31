@@ -215,6 +215,20 @@ def _recall(query: str, use_memory: bool) -> list[str]:
     return [f"({m['when']}, {m['kind']}) {m['text']}" for m in episodic.search(query)]
 
 
+def _waiting_calls() -> str:
+    """Tell the model which calls still wait for approval, so it does not check them and report a failure.
+
+    The instruction is needed: without it, "did that work?" made the model call read_file. See docs/VERIFICATION.md.
+    """
+    calls = ", ".join(f"{name}({json.dumps(args)})" for name, args in tools.PENDING.values())
+    if not calls:
+        return ""
+    return (
+        f"\n\nWaiting for the user's approval, not run yet: {calls}. If the user asks about it, "
+        "say it still waits for their approval, and do not call a tool to check it."
+    )
+
+
 def _execute_call(call: dict) -> tuple[str, dict, dict]:
     """Parse and run one tool call from the model. Returns (name, args, result)."""
     name = call["function"]["name"]
@@ -242,11 +256,46 @@ def _handle_calls(calls: list[dict], msgs: list[dict], trace: list[dict], retrie
     return retries_left
 
 
+def _fixed_reply(trace: list[dict], retries_left: int) -> str | None:
+    """Return the reply that ends the turn after some tool calls, or None to ask the model again.
+
+    A waiting call ends the turn with text from the code: the model said "I've created the file" here, even with
+    "NOT done yet" in the tool result. See docs/VERIFICATION.md.
+    """
+    if retries_left < 0:
+        return "I could not form a valid tool call."
+    waiting = [f"`{t['tool']}`" for t in trace if t["status"] == "pending"]
+    return f"Waiting for your approval to run {', '.join(waiting)}. Not done yet." if waiting else None
+
+
+def approval_note(outcome: dict) -> dict:
+    """Build the history message that tells the model how a call that waited for approval ended.
+
+    The role is assistant, not tool or user: history keeps no tool calls for a tool message to answer, and the
+    output of a command must not read as something the user said. See docs/VERIFICATION.md.
+
+    Args:
+        outcome (dict): The result of `tools.approve`.
+
+    Returns:
+        dict: A chat message with `role` and `content`.
+    """
+    call = f"{outcome['tool']}({json.dumps(outcome['args'])})"
+    if outcome["status"] == "denied":
+        text = f"the user denied {call}. It did not run, so nothing changed."
+    elif outcome["status"] == "ok":
+        text = f"the user approved {call}. It ran. Result: {json.dumps(outcome['result'], default=str)}"
+    else:
+        text = f"the user approved {call}, but it did not finish ({outcome['status']}). Error: {outcome['error']}"
+    return {"role": "assistant", "content": f"Approval outcome: {text}"}
+
+
 def respond(user: list[dict], history: list[dict] | None = None, use_memory: bool = True, max_steps: int = 4) -> dict:
     """A full turn: memories + tools. Returns {"text", "tool_calls", "tokens"}."""
     query = " ".join(p["text"] for p in user if p["type"] == "text")
     names = tools.select(query or "help", config.MAX_TOOLS_PER_REQUEST)
-    msgs, used = fit_budget(system_prompt(), _recall(query, use_memory), history or [], user, tools.schemas(names))
+    system = system_prompt() + _waiting_calls()
+    msgs, used = fit_budget(system, _recall(query, use_memory), history or [], user, tools.schemas(names))
     trace, retries_left = [], config.TOOL_RETRIES
     out = {"tool_calls": trace, "tokens": used, "tools_offered": names}
     for step in range(max_steps):
@@ -259,6 +308,6 @@ def respond(user: list[dict], history: list[dict] | None = None, use_memory: boo
             return {"text": msg.get("content") or "", **out}
         msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         retries_left = _handle_calls(calls, msgs, trace, retries_left)
-        if retries_left < 0:
-            return {"text": "I could not form a valid tool call.", **out}
+        if (text := _fixed_reply(trace, retries_left)) is not None:
+            return {"text": text, **out}
     return {"text": "Stopped after too many tool steps.", **out}

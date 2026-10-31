@@ -6,7 +6,7 @@
     python cli.py note --file note.wav        Task 1 from a file
     python cli.py look                        Task 2: screenshot now -> explanation + fix
     python cli.py look --watch 10             Task 2 on a 10 s screen recording (needs ffmpeg)
-    python cli.py chat "what did I say about Priya?"
+    python cli.py chat "what did I say about John Doe?"
     python cli.py record-clip clip.wav        record a clip from the mic (then: evals add asr clip.wav --text "...")
     python cli.py record-screen demo1         record frames for the screen eval (then: evals add screen demo1 --moment ...)
     python cli.py evals --run                 run every eval on the synthetic and your own cases

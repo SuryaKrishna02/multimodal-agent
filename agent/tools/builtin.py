@@ -157,7 +157,7 @@ def save_note(text: str, tags: list[str] | None = None) -> str:
     "search_memory",
     "Recall what the user said, noted, decided, saw or had to do earlier (voice notes, action items, past screens).",
     {"properties": {"query": {"type": "string", "minLength": 1}}, "required": ["query"]},
-    examples=["what did I say about Priya", "what did I decide about the venue", "what do I need to do tomorrow"],
+    examples=["what did I say about John Doe", "what did I decide about the venue", "what do I need to do tomorrow"],
 )
 def search_memory(query: str) -> list[dict]:
     """Search long-term memory.

@@ -24,6 +24,8 @@ from evals import common as evals_common
 
 state = {"tier": config.TIER, "history": [], "mic": None}
 llm, emb = serving.llm_server(), serving.embed_server()
+# Held while the model replies, so an approval during a reply cannot put its outcome before that turn in the history.
+chat_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -40,6 +42,9 @@ async def lifespan(_app):
             emb.start()
         except Exception as e:  # noqa: BLE001 - show the failure in the event log
             events.emit("serving.error", message=str(e))
+        # After the first start, so the watchers cannot race it. One each, because a restart waits for the model to load.
+        threading.Thread(target=serving.watch, args=(lambda: emb,), daemon=True).start()
+        serving.watch(lambda: llm)
 
     threading.Thread(target=boot, daemon=True).start()
     try:
@@ -158,7 +163,7 @@ def chat_history():
     """List the chat so far, so a page reload shows the same conversation the model still has.
 
     Returns:
-        list[dict]: Messages with `role` and `content`, oldest first.
+        list[dict]: Messages with `role` and `content`, oldest first. An approval outcome also has `approval`.
     """
     return state["history"]
 
@@ -187,8 +192,10 @@ def chat(body: dict):
     user = [brain.part("text", body["text"])]
     if body.get("with_screen"):
         user.insert(0, brain.part("image", screen.capture()))
-    out = brain.respond(user, history=state["history"][-6:])
-    state["history"] += [{"role": "user", "content": body["text"]}, {"role": "assistant", "content": out["text"]}]
+    with chat_lock:
+        history = [{"role": m["role"], "content": m["content"]} for m in state["history"][-6:]]
+        out = brain.respond(user, history=history)
+        state["history"] += [{"role": "user", "content": body["text"]}, {"role": "assistant", "content": out["text"]}]
     return out
 
 
@@ -378,15 +385,18 @@ def tool_list():
 
 @app.post("/api/tools/approve")
 def approve(body: dict):
-    """Approve or deny a tool call that waits for the user.
+    """Approve or deny a tool call that waits for the user, and tell the model how it ended.
 
     Args:
         body (dict): JSON with `call_id` (int) and `yes` (bool).
 
     Returns:
-        dict: The tool result, or `{"status": "denied"}`.
+        dict: The result of `tools.approve`.
     """
-    return tools.approve(int(body["call_id"]), bool(body["yes"]))
+    out = tools.approve(int(body["call_id"]), bool(body["yes"]))
+    with chat_lock:
+        state["history"].append({**brain.approval_note(out), "approval": out})
+    return out
 
 
 @app.get("/api/scorecard")

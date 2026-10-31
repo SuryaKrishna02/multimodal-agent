@@ -144,7 +144,7 @@ def run(name: str, args: dict, approved: bool = False) -> dict:
         out = {
             "status": "pending",
             "call_id": call_id,
-            "error": f"NOT done yet: {reason}. Tell the user it is waiting for their approval.",
+            "error": f"NOT done yet: {reason}.",
         }
     elif status != "ok":
         out = {"status": status, "error": reason}
@@ -165,13 +165,13 @@ def approve(call_id: int, yes: bool) -> dict:
         yes (bool): True to run the call, False to deny it.
 
     Returns:
-        dict: The result of the call, or `{"status": "denied"}`.
+        dict: `tool`, `args` and the result of the call, whose `status` is "denied" if it did not run.
     """
     name, args = PENDING.pop(call_id)
     if not yes:
         events.emit("tools.call", tool=name, args=args, status="denied", error="denied by user")
-        return {"status": "denied"}
-    return run(name, args, approved=True)
+        return {"tool": name, "args": args, "status": "denied"}
+    return {"tool": name, "args": args, **run(name, args, approved=True)}
 
 
 from agent.tools import builtin  # noqa: E402,F401  (registers the built-in tools)

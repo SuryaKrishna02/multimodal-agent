@@ -114,6 +114,96 @@ class RespondLoop(unittest.TestCase):
         self.assertTrue(all(t["status"] == "invalid" for t in out["tool_calls"]))
 
 
+class PendingReply(unittest.TestCase):
+    """A call that waits for approval ends the turn with fixed text, so the reply cannot claim it is done."""
+
+    WRITE = call("write_file", json.dumps({"path": "a.txt", "content": "hi"}))
+
+    def run_batch(self, *calls: dict) -> tuple[dict, mock.MagicMock]:
+        """Run `respond` on one model turn that asks for some calls, and drop the pending calls after.
+
+        Args:
+            *calls (dict): The tool calls.
+
+        Returns:
+            tuple[dict, mock.MagicMock]: The result and the mocked `send`.
+        """
+        self.addCleanup(tools.PENDING.clear)
+        with (
+            mock.patch.object(brain, "send", side_effect=[reply("I have created the file", list(calls))]) as send,
+            mock.patch.object(tools, "select", return_value=["write_file"]),
+        ):
+            return brain.respond([brain.part("text", "write a.txt")], use_memory=False), send
+
+    def test_reply_comes_from_the_code_and_the_model_is_not_asked_again(self):
+        """The text of the model is dropped, and no second request goes out."""
+        out, send = self.run_batch(self.WRITE)
+        self.assertEqual(out["text"], "Waiting for your approval to run `write_file`. Not done yet.")
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(out["tool_calls"][0]["status"], "pending")
+
+    def test_safe_call_in_the_same_batch_still_runs(self):
+        """Only the waiting call is named. The trace keeps the result of the safe call."""
+        out, _ = self.run_batch(call("get_time", "{}"), self.WRITE)
+        self.assertEqual([t["status"] for t in out["tool_calls"]], ["ok", "pending"])
+        self.assertEqual(out["text"], "Waiting for your approval to run `write_file`. Not done yet.")
+
+    def test_next_request_names_the_calls_that_still_wait(self):
+        """Asked "did that work?" before a decision, the model must know the call has not run."""
+        self.run_batch(self.WRITE)
+        with (
+            mock.patch.object(brain, "send", return_value=reply("Not yet")) as send,
+            mock.patch.object(tools, "select", return_value=["write_file"]),
+        ):
+            brain.respond([brain.part("text", "did that work?")], use_memory=False)
+        system = send.call_args.args[0][0]["content"]
+        self.assertIn("not run yet: write_file(", system)
+        self.assertIn("a.txt", system)
+
+
+class ApprovalNote(unittest.TestCase):
+    """brain.approval_note tells the model how a call that waited for approval ended."""
+
+    def outcome(self, yes: bool, **patches) -> dict:
+        """Resolve a real pending call of a mocked tool.
+
+        Args:
+            yes (bool): True to approve the call.
+            **patches: Fields of the registered tool to replace, such as `fn`.
+
+        Returns:
+            dict: The result of `tools.approve`.
+        """
+        with mock.patch.multiple(tools.REGISTRY["write_file"], **patches):
+            pending = tools.run("write_file", {"path": "a.txt", "content": "hi"})
+            return tools.approve(pending["call_id"], yes)
+
+    def test_denied_call_did_not_run(self):
+        """A denied call does not run, and the note says so."""
+        fn = mock.Mock()
+        out = self.outcome(False, fn=fn)
+        fn.assert_not_called()
+        note = brain.approval_note(out)
+        self.assertEqual(note["role"], "assistant")
+        self.assertIn("denied write_file", note["content"])
+        self.assertIn("did not run", note["content"])
+
+    def test_approved_call_reports_its_result(self):
+        """An approved call runs once, and the note holds its result and arguments."""
+        fn = mock.Mock(return_value="wrote 2 characters")
+        note = brain.approval_note(self.outcome(True, fn=fn))
+        fn.assert_called_once_with(path="a.txt", content="hi")
+        self.assertIn("approved write_file", note["content"])
+        self.assertIn("a.txt", note["content"])
+        self.assertIn("wrote 2 characters", note["content"])
+
+    def test_failed_call_reports_the_error(self):
+        """An approved call that fails must not read as done."""
+        note = brain.approval_note(self.outcome(True, fn=mock.Mock(side_effect=OSError("disk full"))))
+        self.assertIn("did not finish (error)", note["content"])
+        self.assertIn("disk full", note["content"])
+
+
 class ElideMedia(unittest.TestCase):
     """brain._elide_media shortens base64 blobs for the debug view."""
 

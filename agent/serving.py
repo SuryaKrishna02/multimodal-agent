@@ -8,6 +8,7 @@ Two servers run side by side:
 import json
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -72,16 +73,18 @@ class LlamaServer:
             RuntimeError: If the server process exits while starting.
             TimeoutError: If the server is not healthy within `timeout_s`.
         """
+        config.RUNTIME.mkdir(parents=True, exist_ok=True)
         running = self.running_model()
         if running == Path(self.args[self.args.index("-m") + 1]).name and self.healthy():
+            self._stop_marker().unlink(missing_ok=True)
             return  # already running (e.g. started by the CLI)
         if running:  # a different model holds the port: swap it out
             self.stop()
-        config.RUNTIME.mkdir(parents=True, exist_ok=True)
-        log = open(config.RUNTIME / f"llama-{self.name}.log", "w")
+        log = open(self._log_path(), "w")
         events.emit("serving.start", server=self.name, cmd=" ".join(self.args))
         t0 = time.time()
         self.proc = subprocess.Popen(self.args, stdout=log, stderr=subprocess.STDOUT)
+        self._stop_marker().unlink(missing_ok=True)  # only now: with no process and no marker, `watch` starts one too
         while time.time() - t0 < timeout_s:
             if self.proc.poll() is not None:
                 raise RuntimeError(f"llama-server '{self.name}' exited; see {log.name}")
@@ -92,13 +95,40 @@ class LlamaServer:
         raise TimeoutError(f"llama-server '{self.name}' did not become healthy")
 
     def stop(self) -> None:
-        """Stop every process that serves this port and wait until the port is free."""
+        """Stop the server on purpose. `watch`, also in another process, then leaves it stopped until `start`."""
         procs = self._processes()
         for p in procs:
             p.terminate()
         psutil.wait_procs(procs, timeout=10)  # free the port before anyone restarts it
         self.proc = None
+        config.RUNTIME.mkdir(parents=True, exist_ok=True)
+        self._stop_marker().touch()
         events.emit("serving.stop", server=self.name)
+
+    def restart_if_stopped(self) -> float:
+        """Start the server again if its process is gone and nobody stopped it on purpose.
+
+        A process that is there but not healthy is left alone: it may still be loading, or busy with a long input.
+
+        Returns:
+            float: Seconds to wait before the next check.
+        """
+        if self._processes() or self._stop_marker().exists():
+            return config.SERVER_WATCH_S
+        try:
+            if self._log_path().exists():  # `start` overwrites the log, and it may say why the server stopped
+                self._log_path().replace(self._log_path().with_suffix(".previous.log"))
+            events.emit("serving.restart", server=self.name)
+            self.start()
+        except Exception as e:  # keep watching: a dead watcher would hide the next stop
+            events.emit("serving.error", message=f"Could not restart the {self.name} server: {e}")
+        return config.SERVER_RETRY_S
+
+    def _log_path(self) -> Path:
+        return config.RUNTIME / f"llama-{self.name}.log"
+
+    def _stop_marker(self) -> Path:
+        return config.RUNTIME / f"llama-{self.name}.stopped"
 
     def running_model(self) -> str | None:
         """File name of the model the server on this port is serving, if any."""
@@ -120,6 +150,17 @@ class LlamaServer:
         return found
 
 
+def watch(current: Callable[[], LlamaServer]) -> None:
+    """Restart a server each time its process stops by accident. Never returns: run it in a daemon thread.
+
+    Args:
+        current (Callable[[], LlamaServer]): Returns the server to watch. A function, because a switch of tier
+            replaces the server, and a watcher of the old one would bring the old model back.
+    """
+    while True:
+        time.sleep(current().restart_if_stopped())
+
+
 def llm_server(tier: str | None = None) -> LlamaServer:
     """Build the language model server for a model tier.
 
@@ -132,7 +173,7 @@ def llm_server(tier: str | None = None) -> LlamaServer:
     from agent.senses import video
 
     t = config.TIERS[tier or config.TIER]
-    extra = ["-c", str(config.LLM_CTX), "-np", "1", "--metrics", "--video-fps", str(config.VIDEO_FPS)]
+    extra = ["-c", str(config.LLM_CTX), "-np", "1", "--video-fps", str(config.VIDEO_FPS)]
     if video.ffmpeg_dir():  # llama-server decodes video with ffmpeg + ffprobe
         extra += ["--video-ffmpeg-dir", video.ffmpeg_dir()]
     return LlamaServer("llm", t["model"], t["mmproj"], config.LLM_PORT, extra)
@@ -144,12 +185,13 @@ def embed_server() -> LlamaServer:
     Returns:
         LlamaServer: The server, not yet started.
     """
+    size = str(config.EMBED_CTX)  # the default batch of 512 tokens rejects a longer input with HTTP 500
     return LlamaServer(
         "embed",
         config.EMBED["model"],
         config.EMBED["mmproj"],
         config.EMBED_PORT,
-        ["--embeddings", "-c", "8192", "-np", "1"],
+        ["--embeddings", "-c", size, "-b", size, "-ub", size, "-np", "1", "--video-fps", str(config.VIDEO_FPS)],
     )
 
 

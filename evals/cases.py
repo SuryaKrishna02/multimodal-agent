@@ -298,7 +298,7 @@ def _add_parsers(sub) -> None:
     p.add_argument("prompt")
     p.add_argument("--tool", required=True, help="tool name, or 'none' if the model should just answer")
     p.add_argument(
-        "--args", type=_json_arg, default={}, help='JSON of arguments that must appear, e.g. \'{"query": "Priya"}\''
+        "--args", type=_json_arg, default={}, help='JSON of arguments that must appear, e.g. \'{"query": "John Doe"}\''
     )
     p.set_defaults(handler=add_tool_call)
     p = sub.add_parser("tools", help="a tool call and what the permission layer must do")

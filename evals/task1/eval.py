@@ -2,7 +2,7 @@
 
 Cases: data/evals/{synthetic,user}/task1/
     note01.wav    a voice note as you would really say it (pauses, "um"s, asides are fine)
-    note01.json   {"action_items": ["Email Priya the slides", "Book a room for Thursday"]}
+    note01.json   {"action_items": ["Email John Doe the slides", "Book a room for Thursday"]}
 
 Matching: each predicted item is paired with at most one expected item, greedily by word
 overlap (F1 of content words). A pair counts if the overlap F1 >= MATCH_F1.

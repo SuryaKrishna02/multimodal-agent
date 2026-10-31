@@ -33,6 +33,10 @@ THINKING = False  # Gemma 4 thinks by default; off = faster + shorter
 EMBED = {"model": "embeddinggemma-2-Q8_0.gguf", "mmproj": "mmproj-embeddinggemma-2-Q8_0.gguf"}
 EMBED_PORT = 9932
 EMBED_DIM = 768
+EMBED_CTX = 8192  # tokens for one input; an embedding must fit in one batch, so the batch size matches
+
+SERVER_WATCH_S = 5  # seconds between checks that a watched server's process is still there
+SERVER_RETRY_S = 60  # seconds to wait after a restart, so a server that keeps dying cannot loop fast
 
 # --- Senses ------------------------------------------------------------------
 SAMPLE_RATE = 16000  # Gemma 4 audio + Silero VAD both expect 16 kHz mono
