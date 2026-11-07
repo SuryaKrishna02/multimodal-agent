@@ -40,6 +40,15 @@ class PlatformContract(unittest.TestCase):
                 Platform().record_screen(tmp, 1)
             with self.assertRaises(Unsupported):
                 Platform().synthesize_speech("hi", tmp)
+            with self.assertRaises(Unsupported):
+                Platform().install_autostart("x", ["true"], tmp, tmp)
+        for call in (
+            Platform().keep_awake,
+            lambda: Platform().notify("t", "m"),
+            lambda: Platform().uninstall_autostart("x"),
+        ):
+            with self.assertRaises(Unsupported):
+                call()
 
     def test_current_always_returns_something(self):
         """`current()` falls back to the generic platform."""
@@ -87,6 +96,20 @@ class AcceleratorContract(unittest.TestCase):
                     self.assertIn(dl.archive, ("tar.gz", "zip"))
                     self.assertTrue(dl.url.endswith("." + dl.archive))
 
+    def test_missing_transcribe_is_a_clear_error(self):
+        """The base accelerator raises Unsupported for speech to text, naming the fallback."""
+        with self.assertRaisesRegex(Unsupported, "STT_ENGINE"):
+            Accelerator().transcribe([], "en")
+
+    def test_speech_model_pins_are_pinned(self):
+        """Each speech model file has an https URL, a sha256 and the "whisper" group."""
+        for name in accel.available():
+            for pin in accel.load(name).stt_pins:
+                with self.subTest(f"{name}/{pin.dest}"):
+                    self.assertTrue(pin.url.startswith("https://"))
+                    self.assertRegex(pin.sha256, r"^[0-9a-f]{64}$")
+                    self.assertEqual(pin.group, "whisper")
+
     def test_missing_download_is_a_clear_error(self):
         """A missing download raises Unsupported."""
         with self.assertRaisesRegex(Unsupported, "no llama.cpp download"):
@@ -104,6 +127,10 @@ class NoOsLeaksInCore(unittest.TestCase):
         r"\bbrew install\b",
         r"/System/Library",
         r"\.venv/bin",
+        r"\bcaffeinate\b",
+        r"\bosascript\b",
+        r"\blaunchctl\b",
+        r"\bmlx_whisper\b",
     ]
     ALLOWED = (
         "agent/platforms/",

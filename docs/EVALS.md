@@ -35,6 +35,11 @@ python cli.py evals add -h        # add your own case
 | `screen` | 4 frame sequences at 2 fps (error dialog, window switch, idle, log lines) | drawn with Pillow |
 | `structured` | action-item texts, screen-help pictures, 2 spoken notes | reuses the above |
 | `serving` | 3 fixed prompts, 3 repeats | built into the eval |
+| `daemon` | 2 kills in the middle of a job, and the newest soak result | built into the eval; the soak comes from `scripts/soak.py` |
+| `multimodal` | 8 screenshots and 10 speech clips, with a text query for each | drawn with Pillow and spoken by the OS voice |
+| `consolidation` | 2 day logs (19 raw rows) with 15 queries | written by hand in `evals/synthetic/day.py` |
+| `task3` | a 57 s morning conversation with 3 voices, and 8 questions (1 has no answer) | OS text-to-speech, 3 voices |
+| `task4` | 8 days of memories (4 dev, 4 test), 6 preferences, 1 overfitting example | written by hand; the simulated user is code |
 
 Speech needs the `synthesize_speech` hook of your OS plug-in (macOS has it). Without it, the audio evals
 skip with a message, and text and screen evals still run.
@@ -43,6 +48,36 @@ skip with a message, and text and screen evals still run.
 text-to-speech is cleaner than a real voice, and a drawn terminal is cleaner than a real screen. ASR, VAD and Task 1
 scores are optimistic. A drop is a real regression; a pass does not prove it works for you.
 Do not change `config.THRESHOLDS` to make a run pass.
+
+## Session 2 evals
+
+| Eval | Level | What it measures | How |
+|---|---|---|---|
+| `asr` (extended) | component | Word error rate of Gemma 4 and of Whisper on the same clips, and seconds per clip | each clip goes through both engines |
+| `daemon` | component | Recovery time after a kill, finished steps that ran again (must be 0), lost jobs, memory growth and missed events over hours | a real daemon process on a throwaway runtime folder, killed with SIGKILL |
+| `multimodal` | component | Recall of a screenshot or a clip by a text query, with text vectors, media vectors or both | top 3 and top 1 |
+| `consolidation` | component | Faithfulness of each claim to the rows it cites, invalid citations, compression, recall before and after forgetting | a separate Gemma request judges each claim |
+| `task3` | end-to-end | Questions about a conversation, hours later: correct answers, "I do not know" when nobody said it, answers that cite memory | the recording goes through the same listener as the microphone |
+| `task4` | end-to-end | Preference compliance before and after feedback rounds, on held-out days; regressions; edits to locked blocks; one overfitting example | the simulated user gives feedback on dev days only |
+
+**Held-out days in Task 4.** The simulated user gives feedback only on the 4 dev days. The 4 test days are only
+scored, so `test_gain` is a gain on briefs that the reflection never saw. `regression_rate` counts test checks that
+passed with the seed prompt and fail after the last round.
+
+**The overfitting example.** The eval starts again from the seed prompt. It gives 3 rounds of feedback that is only
+true for one dev day. The feedback is "Start the headline with the word Dentist" and "Always mention Dr. Lee in the
+first bullet".
+
+Then the eval checks two things. Does that day follow the rule (`overfit_dev_gain`)? Do the test days, which have no
+dentist, now mention one (`overfit_test_leak`)? The reflection prompt asks for rules "that hold on every day". The
+result shows whether that instruction is enough.
+
+**The soak test runs beforehand.** `python scripts/soak.py --hours 3` runs its own daemon on a throwaway runtime folder
+and queues a replay of the synthetic conversation every 5 minutes. The `daemon` eval reads the newest file in
+`evals/results/soak/`. The soak metrics stay empty until you run it.
+
+**The judges share the writer's blind spots.** Consolidation faithfulness and your own Task 4 preferences are judged by
+Gemma 4, the same model family that wrote the text. A judge can miss what the writer missed. Read the failed claims.
 
 ## Add a case from your own use
 
@@ -78,7 +113,17 @@ python cli.py evals add screen demo1 --moment 12.5 "error dialog appears"
 
 # JSON validity
 python cli.py evals add structured --schema action_items --text "Call mum and pay rent by Friday."
+
+# Session 2
+python cli.py evals add multimodal shot.png --query "the screen with the failing build"
+python cli.py evals add consolidation myday.json        # format: the docstring of evals/consolidation/eval.py
+python cli.py evals add task3 morning.wav --start 09:00 --question "Which venue did we pick?" --mention "lakeside"
+python cli.py evals add task3 --to u001 --question "What did we decide about catering?" --unanswerable
+python cli.py evals add task4 --split test --memory "(09:00, fact) Demo is on Friday at 16:00" --memory "(11:00, action_item) Send slides (due tomorrow)"
+python cli.py evals add task4 --prefer "Mention the weather first" --complaint "Start with the weather."
 ```
+
+For `task4`, your folder needs both days and preferences. Your preferences have no code check, so Gemma judges them.
 
 In `--mention`, each flag is one group. The answer must contain at least one phrase (separate phrases with `|`)
 from every group, in any case. Keep the phrases short and specific, so you can read why an answer passed or failed.

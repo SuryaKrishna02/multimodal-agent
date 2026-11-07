@@ -9,7 +9,7 @@ Run the whole agent on your own machine. Everything stays on it: the model serve
 |---|---|
 | Machine | Verified: Apple Silicon Mac (M4, 24 GB, macOS 27.0.1). Other OSes and GPUs: see [PLATFORMS.md](PLATFORMS.md) |
 | Memory | 16 GB works with the E2B tier. 24 GB or more is better for E4B |
-| Disk | about 11 GB (both model tiers + embedding model) |
+| Disk | about 13 GB (both model tiers, the embedding model and Whisper large-v3-turbo) |
 | Python | 3.10 or newer (tested with 3.13.3) |
 | Optional | `ffmpeg` + `ffprobe` for screen-video input and the two synthetic video cases of the task2 eval (the doctor prints the install command for your OS) |
 
@@ -29,9 +29,13 @@ python3 scripts/setup.py
 - Gemma 4 **E4B** and **E2B** (Q4_0, from Google's QAT checkpoints) + their Q8_0 image/audio projectors
 - **EmbeddingGemma-2** (Q8_0) + its projector, for memory search over text, images and audio
 - **Silero VAD** v6.2.3 (ONNX file only)
+- **Whisper large-v3-turbo** in MLX format (1.6 GB), for always-on listening. It is the `stt_pins` of your
+  accelerator plug-in, so only an accelerator with a `transcribe` hook downloads it (on a Mac: Metal)
 - a `.venv` with the pinned packages (`requirements/lock-<os>.txt`, else `requirements/base.txt`)
+- the packages of `requirements/nodeps-<os>.txt`, installed with `--no-deps`. On macOS this is `mlx-whisper`:
+  it declares `torch`, but only its weight converter uses it. The lock file pins what `transcribe` needs instead.
 
-Skip what you do not need: `python3 scripts/setup.py --only e2b embed vad`.
+Skip what you do not need: `python3 scripts/setup.py --only e2b embed vad whisper`.
 Force a choice: `AGENT_ACCEL=<name>` or `AGENT_PLATFORM=<name>` (names: `cli.py doctor`).
 
 Then check what the agent detected, and that text, image and audio all work. Use the venv's Python
@@ -53,6 +57,7 @@ Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code,
 | Microphone | recording voice notes | silent recordings |
 | Screen Recording | Task 2, screen videos, screen evals | blank screenshots, and the dashboard shows a warning |
 | Accessibility + Input Monitoring | the global hotkey (Ctrl+Option+Space) | the hotkey does nothing, and the event log shows a warning |
+| Notifications | daemon notifications, sent with `osascript`. Allow them for the app that System Settings > Notifications lists after the first one | the brief is ready, but no notification shows |
 
 ## Run
 
@@ -60,16 +65,23 @@ Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code,
 .venv/bin/python cli.py dashboard     # open http://127.0.0.1:8765 in Chrome
 ```
 
-The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 7
-follow the session agenda: Serving, Senses, Brain, Memory, Tools, Tasks, Scorecard.
-Press the number keys to switch tabs. The page is light only. The chat sits on the right (press C to hide it and give
-the tabs more room), and a bar at the bottom opens the Activity log (the event log). When a tool call waits for your
-approval, Approve and Deny appear in the chat, above the message box. With the chat hidden or on a narrow window, they
-appear in a banner at the top instead. A dot on a tab lights up while that part of the agent is working.
-After you decide, the chat history holds the outcome, so you can ask the model "did that work?"
+The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 9
+follow the session agenda. Session 1 has Serving, Senses, Brain, Memory and Tools. Session 2 adds Always on and Evolve.
+Tasks and Scorecard come last.
 
-If a model server stops unexpectedly, the dashboard restarts it on the current tier. `data/runtime/llama-llm.previous.log`
-or `llama-embed.previous.log` keeps the log of the server that stopped. The dashboard does not restart a server that
+Press the number keys to switch tabs. The page is light only. The chat sits on the right. Press C to hide it and give
+the tabs more room. A bar at the bottom opens the Activity log (the event log). A dot on a tab lights up while that part
+of the agent is working.
+
+When a tool call waits for your approval, Approve and Deny appear in the chat, above the message box. With the chat
+hidden or on a narrow window, they appear in a banner at the top instead. After you decide, the chat history holds the
+outcome, so you can ask the model "did that work?"
+
+If a model server stops unexpectedly, the dashboard restarts it on the current tier. While the daemon runs, the daemon
+restarts it instead. `data/runtime/llama-llm.previous.log` or `llama-embed.previous.log` keeps the log of the server
+that stopped.
+
+The dashboard does not restart a server that
 `python cli.py stop` stopped: the next dashboard start or `python cli.py serve` starts it again. Until then, the header
 says "starting…".
 
@@ -86,6 +98,41 @@ Without the dashboard:
 
 Switch to the small model for any command: `AGENT_TIER=e2b .venv/bin/python cli.py ...`
 
+## Always on (Session 2)
+
+The daemon is a separate process. It runs jobs from a queue, on a schedule (`config.SCHEDULE`) and on
+triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The dashboard shows it in the Always on tab.
+
+```bash
+.venv/bin/python cli.py daemon start             # in the background; the log is data/runtime/daemon.log
+.venv/bin/python cli.py daemon status
+.venv/bin/python cli.py listen on                # always-on listening: Whisper -> raw memories (the Mic switch pauses it)
+.venv/bin/python cli.py replay data/evals/synthetic/task3/conversation.wav --at 09:00    # Task 3 demo input
+.venv/bin/python cli.py ask "what did we decide about the offsite venue this morning?"
+.venv/bin/python cli.py brief                    # Task 4: today's brief
+.venv/bin/python cli.py feedback 1 --bad "too long, and put the deadlines first"
+.venv/bin/python cli.py evolve reflect           # patch the prompt from the feedback
+.venv/bin/python cli.py evolve versions          # then: evolve diff 1 2, evolve rollback 1
+.venv/bin/python cli.py daemon kill              # a crash (SIGKILL): start it again and it resumes the job
+.venv/bin/python cli.py daemon stop
+```
+
+For the live demo of Task 4, you can run some feedback rounds before the session:
+`python cli.py evolve simulate --rounds 3`. The simulated user writes the feedback, and each row is labeled
+`simulated`. Then you give one round of your own feedback live.
+
+**Start at login.** `python cli.py daemon install` writes a LaunchAgent on macOS
+(`~/Library/LaunchAgents/com.multimodal-agent.daemon.plist`). launchd then starts the daemon when you log in, and
+again after a crash. A clean `daemon stop` exits with code 0, so launchd does not restart it.
+`python cli.py daemon uninstall` removes the LaunchAgent.
+
+We did not test whether a process that launchd starts gets the Microphone permission of your terminal app. Check
+`listen on` once after you install it.
+
+**Keep the Mac awake.** While the daemon runs, it holds `caffeinate -i`, so idle sleep does not stop it. The hold ends
+when the daemon exits, even after a kill. A Mac laptop still sleeps when you close the lid, unless it is on power with
+an external display. For hours of listening, keep the lid open and the charger connected.
+
 ## Evals
 
 ```bash
@@ -96,6 +143,12 @@ Switch to the small model for any command: `AGENT_TIER=e2b .venv/bin/python cli.
 
 There is nothing to record. The first run builds synthetic cases (speech, screenshots, tool calls, memories)
 into `data/evals/synthetic/`. To add a case from your own use, see [EVALS.md](EVALS.md).
+
+The soak test of the daemon runs for hours, so record it before the session. The `daemon` eval reads the newest result:
+
+```bash
+.venv/bin/python scripts/soak.py --hours 3
+```
 
 ## Troubleshooting
 

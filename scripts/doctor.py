@@ -1,7 +1,7 @@
 """Doctor: what platform and accelerator did we detect, and does everything they need work?
 
     python scripts/doctor.py              # report only (instant)
-    python scripts/doctor.py --exercise   # also run the hooks: 2 s screen recording, speech, memory probe
+    python scripts/doctor.py --exercise   # also run the hooks: screen, speech, keep-awake, a notification, Whisper
 
 Paste this output into your PR when you add a platform or accelerator.
 Standard library only, so it works on a machine where setup has not finished.
@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from agent import accel, config, pins, platforms  # noqa: E402
+from agent.accel.base import HOOKS as ACCEL_HOOKS  # noqa: E402
 from agent.platforms.base import Unsupported  # noqa: E402
 
 failures = 0
@@ -86,6 +87,22 @@ def report_hooks(plat) -> None:
         print(f"        permission: {name} (for {why})")
 
 
+def report_accel_hooks(a) -> None:
+    """Report which accelerator hooks the plug-in implements.
+
+    Args:
+        a (Accelerator | None): The accelerator plug-in, if any.
+    """
+    if not a:
+        return
+    print("\nAccelerator hooks")
+    for hook in ACCEL_HOOKS:
+        if implemented(a, hook):
+            row("ok", hook)
+        else:
+            row("MISSING", hook, f"not implemented for '{a.name}': see CONTRIBUTING.md")
+
+
 def _report_server() -> None:
     """Report whether the llama-server binary for the detected accelerator is installed."""
     try:
@@ -117,7 +134,7 @@ def report_files(plat, a) -> None:
     print("\nInstalled")
     if a:
         _report_server()
-    for pin in pins.PINS:
+    for pin in [*pins.PINS, *(a.stt_pins if a else [])]:
         p = pins.path(pin)
         row("ok" if p.exists() else "MISS", pin.group + " " + p.name, "" if p.exists() else "run scripts/setup.py")
     _report_tools(plat)
@@ -169,6 +186,38 @@ def exercise(plat, a) -> None:
             lambda: ("ok", f"{a.server_memory_gb([psutil.Process()]):.2f} GB for this Python process"),
         )
         row("ok", "server_args", " ".join(a.server_args()) or "(none)")
+    exercise_always_on(plat, a)
+
+
+def _awake(plat) -> tuple[str, str]:
+    """Start and stop the keep-awake block."""
+    handle = plat.keep_awake()
+    handle.stop()
+    return "ok", "started and stopped"
+
+
+def _whisper(plat, a) -> tuple[str, str]:
+    """Speak a sentence with the OS voice and transcribe it with the accelerator's speech model."""
+    from agent.senses import audio
+
+    with tempfile.TemporaryDirectory() as d:
+        wav = plat.synthesize_speech("Testing one two three.", Path(d) / "speech")
+        text = a.transcribe(audio.load_wav(wav), config.STT_LANGUAGE)
+    return ("ok" if "three" in text.lower() or "3" in text else "FAIL"), repr(text)
+
+
+def exercise_always_on(plat, a) -> None:
+    """Run the Session 2 hooks: keep-awake, one notification and speech to text. Autostart is not run.
+
+    Args:
+        plat (Platform): The platform plug-in.
+        a (Accelerator | None): The accelerator plug-in, if any.
+    """
+    try_hook("keep_awake", lambda: _awake(plat))
+    try_hook("notify", lambda: (plat.notify("multimodal-agent doctor", "Notifications work."), ("ok", "sent one"))[1])
+    if a:
+        try_hook("transcribe", lambda: _whisper(plat, a))
+    row("ok", "install_autostart", "not run: it changes your login items (cli.py daemon install)")
 
 
 def main() -> int:
@@ -183,6 +232,7 @@ def main() -> int:
     print(f"Python {sys.version.split()[0]}   llama.cpp {config.LLAMA_BUILD}   tier {config.TIER}\n")
     plat, a = report_detection()
     report_hooks(plat)
+    report_accel_hooks(a)
     report_files(plat, a)
     if args.exercise:
         exercise(plat, a)

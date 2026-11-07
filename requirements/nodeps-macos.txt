@@ -1,0 +1,5 @@
+# Installed with `pip install --no-deps` after lock-macos.txt (scripts/setup.py does this).
+# mlx-whisper 0.4.3 declares torch, numba, scipy, tiktoken, ... torch (138 MB) is used only by its
+# weight-conversion script, never by transcribe(), so its real runtime dependencies are pinned in
+# lock-macos.txt and torch is left out. Checked against the 0.4.3 wheel on 2026-11-06.
+mlx-whisper==0.4.3      # Whisper on Apple Silicon (MLX): always-on speech to text, agent/accel/metal.py

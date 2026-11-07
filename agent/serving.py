@@ -150,15 +150,17 @@ class LlamaServer:
         return found
 
 
-def watch(current: Callable[[], LlamaServer]) -> None:
+def watch(current: Callable[[], LlamaServer], enabled: Callable[[], bool] = lambda: True) -> None:
     """Restart a server each time its process stops by accident. Never returns: run it in a daemon thread.
 
     Args:
         current (Callable[[], LlamaServer]): Returns the server to watch. A function, because a switch of tier
             replaces the server, and a watcher of the old one would bring the old model back.
+        enabled (Callable[[], bool], optional): Watch only while this returns True. The dashboard turns its
+            watcher off while the daemon runs, so two processes never start the same server. Defaults to always.
     """
     while True:
-        time.sleep(current().restart_if_stopped())
+        time.sleep(current().restart_if_stopped() if enabled() else config.SERVER_WATCH_S)
 
 
 def llm_server(tier: str | None = None) -> LlamaServer:

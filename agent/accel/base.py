@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent import config
-from agent.platforms.base import Unsupported
+from agent.platforms.base import Unsupported, needs_override
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,7 @@ class Accelerator:
     description = ""
     priority = 0  # auto-detect tries the highest first (cuda 90, metal 90, vulkan 50, cpu 0)
     downloads: dict[str, Download] = {}  # keyed by platform name: {"macos": ..., "linux": ...}
+    stt_pins: list = []  # agent.pins.Pin files that `transcribe` needs (setup group "whisper")
 
     @classmethod
     def matches(cls) -> bool:
@@ -100,3 +101,19 @@ class Accelerator:
         driver's number (nvidia-smi, rocm-smi) or the serving eval under-reports.
         """
         return sum(p.memory_info().rss for p in processes) / 1e9
+
+    # --- Speech to text (Session 2) -------------------------------------------
+    @needs_override
+    def transcribe(self, samples, language: str | None) -> str:
+        """Transcribe 16 kHz mono float32 audio with a dedicated speech model, for always-on listening.
+
+        The model files are the `stt_pins` of this plug-in, under `config.WHISPER_DIR`.
+        """
+        raise Unsupported(
+            f"Accelerator '{self.name}' does not implement transcribe(). Add it in agent/accel/{self.name}.py, "
+            "or set config.STT_ENGINE = 'gemma'; see CONTRIBUTING.md."
+        )
+
+
+# The accelerator hooks `doctor` checks. Add new hooks here when you add them above.
+HOOKS = ("server_args", "server_memory_gb", "transcribe")

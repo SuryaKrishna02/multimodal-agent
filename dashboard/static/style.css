@@ -90,7 +90,7 @@ body.chat-hidden #chat { display: none; }
 .chat-head h2 { margin: 0; font-size: 15.5px; font-weight: 650; }
 
 /* Tabs: two lines, so a viewer who joins late can read what each section is. */
-#tabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; background: var(--card); border: 1px solid var(--line);
+#tabs { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; background: var(--card); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 4px; margin-bottom: 18px; }
 #tabs button { background: none; color: var(--muted); border: 0; border-radius: 8px; padding: 7px 8px 8px 10px; text-align: left; font-weight: 600; min-width: 0; }
 #tabs button:hover { color: var(--text); background: var(--surface); }
@@ -460,3 +460,32 @@ button.step-body.selected { border-color: var(--accent); background: var(--accen
   .stat { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* --- Session 2: daemon, consolidation, evolution ------------------------------------ */
+#tabs .dot { width: 7px; height: 7px; margin-left: auto; }
+.feed-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); align-items: baseline; }
+.feed-row:first-child { border-top: 0; }
+.feed-row .why { color: var(--muted); font-size: 13px; }
+.feed-row time { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.job { border-top: 1px solid var(--line); padding: 6px 0; }
+.job summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.phases { display: grid; grid-template-columns: max-content repeat(3, max-content) minmax(0, 1fr); gap: 2px 12px; margin: 8px 0 4px 18px; font-size: 13px; }
+.phases .ph { font-family: var(--mono); }
+.phases .ph.done { color: var(--ok); }
+.phases .ph.open { color: var(--warn); }
+.prompt-block { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-top: 8px; }
+.prompt-block.locked { background: var(--surface); }
+.prompt-block.editable { border-color: var(--accent); }
+.prompt-block pre { margin: 6px 0 0; white-space: pre-wrap; background: none; border: 0; padding: 0; }
+.diff { font-family: var(--mono); font-size: 13px; white-space: pre-wrap; margin: 0; }
+.diff .add { background: var(--ok-soft); display: block; }
+.diff .del { background: var(--bad-soft); display: block; }
+.diff .hunk { color: var(--muted); display: block; }
+.version-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); align-items: center; }
+.version-row:first-child { border-top: 0; }
+.version-row.active b { color: var(--accent); }
+.heard { margin-top: 10px; max-height: 220px; overflow: auto; }
+.heard div { font-size: 14px; padding: 3px 0; border-top: 1px dashed var(--line); }
+.heard div:first-child { border-top: 0; }
+.cites { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.cites .hit { color: var(--text); }

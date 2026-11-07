@@ -5,6 +5,10 @@ import sys
 
 from agent import config
 from agent.accel.base import Accelerator, Download
+from agent.pins import HF, Pin
+
+WHISPER_REV = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"  # mlx-community/whisper-large-v3-turbo
+_WHISPER = f"{HF}/mlx-community/whisper-large-v3-turbo/resolve/{WHISPER_REV}"
 
 
 class Metal(Accelerator):
@@ -23,6 +27,21 @@ class Metal(Accelerator):
         ),
     }
 
+    stt_pins = [
+        Pin(
+            f"{_WHISPER}/config.json",
+            "models/whisper-large-v3-turbo/config.json",
+            "b34fc29e4e11e0a25e812775dd67f4dd16fc2c8eb43d28ae25ff7d660ecb6379",
+            "whisper",
+        ),
+        Pin(
+            f"{_WHISPER}/weights.safetensors",
+            "models/whisper-large-v3-turbo/weights.safetensors",
+            "951ed3fc1203e6a62467abb2144a96ce7eafca8fa77e3704fdb8635ff3e7f8a6",
+            "whisper",
+        ),
+    ]
+
     @classmethod
     def matches(cls) -> bool:
         """Detect Apple Silicon.
@@ -31,3 +50,24 @@ class Metal(Accelerator):
             bool: True on macOS with an arm64 processor.
         """
         return sys.platform == "darwin" and platform.machine() == "arm64"
+
+    def transcribe(self, samples, language: str | None) -> str:
+        """Transcribe audio with Whisper large-v3-turbo on MLX (mlx-whisper, installed without torch).
+
+        Args:
+            samples (np.ndarray): 16 kHz mono float32 audio.
+            language (str | None): Language code such as "en", or None to detect it.
+
+        Returns:
+            str: The transcript.
+        """
+        import mlx_whisper  # macOS lock file only; installed with --no-deps (see requirements/nodeps-macos.txt)
+
+        out = mlx_whisper.transcribe(
+            samples,
+            path_or_hf_repo=str(config.WHISPER_DIR),
+            language=language,
+            condition_on_previous_text=False,  # each clip stands alone: no hallucinated carry-over
+            verbose=None,
+        )
+        return str(out["text"]).strip()

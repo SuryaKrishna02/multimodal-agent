@@ -1,7 +1,7 @@
 """One-time setup on any OS: pinned llama.cpp build for your accelerator, pinned models, Python venv.
 
     python3 scripts/setup.py                     # detect OS + accelerator automatically
-    python3 scripts/setup.py --only e2b vad      # skip the groups you do not need (e4b e2b embed vad)
+    python3 scripts/setup.py --only e2b vad      # skip the groups you do not need (e4b e2b embed vad whisper)
     AGENT_ACCEL=cuda python3 scripts/setup.py    # force an accelerator (see: cli.py doctor)
 
 Everything is checksum-verified; re-running skips files that are already correct.
@@ -135,6 +135,9 @@ def setup_venv(plat: platforms.Platform) -> Path:
         )
     subprocess.run([str(py), "-m", "pip", "install", "-q", "--upgrade", "pip"], check=True)
     subprocess.run([str(py), "-m", "pip", "install", "-q", "-r", str(reqs)], check=True)
+    nodeps = ROOT / "requirements" / f"nodeps-{plat.name}.txt"
+    if nodeps.exists():  # packages whose declared dependencies are too wide; the lock file pins what they use
+        subprocess.run([str(py), "-m", "pip", "install", "-q", "--no-deps", "-r", str(nodeps)], check=True)
     return py
 
 
@@ -144,16 +147,16 @@ def main() -> None:
     ap.add_argument(
         "--only",
         nargs="+",
-        choices=["e4b", "e2b", "embed", "vad"],
+        choices=["e4b", "e2b", "embed", "vad", "whisper"],
         metavar="GROUP",
-        help="download only these groups: e4b e2b embed vad (default: all)",
+        help="download only these groups: e4b e2b embed vad whisper (default: all)",
     )
     only = ap.parse_args().only
     plat, a = platforms.current(), accel.current()
     print(f"platform: {plat.name}   accelerator: {a.name}   llama.cpp {config.LLAMA_BUILD}\n")
 
     install_llama(a, plat)
-    for pin in pins.PINS:
+    for pin in [*pins.PINS, *a.stt_pins]:  # stt_pins: the speech model of this accelerator, if it has one
         if not only or pin.group in only:
             fetch(pin.url, pins.path(pin), pin.sha256)
     py = setup_venv(plat)

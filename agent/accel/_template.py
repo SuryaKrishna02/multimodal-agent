@@ -33,3 +33,5 @@ class MyBackend(Accelerator):  # one Accelerator subclass per file
 
     # def server_args(self) -> list[str]:                # e.g. ["-ngl", "99"]
     # def server_memory_gb(self, processes) -> float:    # VRAM from the driver, not RSS
+    # stt_pins = [Pin(...)]                              # Session 2: speech model files, group "whisper"
+    # def transcribe(self, samples, language) -> str:    # e.g. faster-whisper on CUDA; else STT_ENGINE="gemma"

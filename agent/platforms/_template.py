@@ -31,9 +31,16 @@ class MyOS(Platform):  # one Platform subclass per file
         """Record the main display for `seconds` into `out`. ffmpeg is a fine choice if present."""
         raise NotImplementedError
 
-    def synthesize_speech(self, text: str, out: Path) -> Path:
-        """Write spoken `text` to an audio file soundfile can read; return the path."""
+    def synthesize_speech(self, text: str, out: Path, voice: int = 0) -> Path:
+        """Write spoken `text` to an audio file soundfile can read; return the path. `voice` = n-th voice."""
         raise NotImplementedError
+
+    # Session 2 (always on). Leave out a hook you cannot test: the base raises Unsupported for it.
+    # def keep_awake(self): ...                          # return an object with .stop(); must end if we die
+    # def notify(self, title, message) -> None: ...      # pass strings as arguments, never as script text
+    # def install_autostart(self, label, cmd, cwd, log) -> Path: ...   # systemd user unit, Task Scheduler...
+    # def uninstall_autostart(self, label) -> bool: ...
+    # def spawn_background(self, cmd, cwd, log) -> int: ...            # only if the default does not detach
 
     # def start_hotkey(self, combo, on_press): ...      # only if pynput does not work here
     # def hotkey_warning(self) -> str | None: ...       # permissions that silently block hotkeys

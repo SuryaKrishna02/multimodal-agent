@@ -19,16 +19,68 @@ import importlib
 import json
 import time
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from agent import config
 from agent.platforms.base import Unsupported
 
-COMPONENTS = ["serving", "vad", "asr", "screen", "structured", "tool_calls", "memory", "tools", "task1", "task2"]
+COMPONENTS = [
+    "serving",
+    "vad",
+    "asr",
+    "screen",
+    "structured",
+    "tool_calls",
+    "memory",
+    "tools",
+    "task1",
+    "task2",
+    # Session 2
+    "daemon",
+    "multimodal",
+    "consolidation",
+    "task3",
+    "task4",
+]
 
 
 class NoCases(Exception):
     """This component has no eval cases, for example because synthetic audio needs a speech plug-in."""
+
+
+@contextmanager
+def isolated(name: str) -> Iterator[Path]:
+    """Point memory, checkpoints and evolution at throwaway databases, so an eval never touches yours.
+
+    Args:
+        name (str): Eval name, used in the file names under `config.RESULTS`.
+
+    Yields:
+        Path: The folder that holds the throwaway databases.
+    """
+    folder = config.RESULTS / f"{name}-db"
+    folder.mkdir(parents=True, exist_ok=True)
+    keys = ("MEMORY_DB", "CHECKPOINT_DB", "EVOLVE_DB")
+    real = {k: getattr(config, k) for k in keys}
+    for k in keys:
+        setattr(config, k, folder / f"{k.lower()}.sqlite")
+    try:
+        yield folder
+    finally:
+        for k, v in real.items():
+            setattr(config, k, v)
+
+
+def reset(folder: Path) -> None:
+    """Delete the throwaway databases that `isolated` made.
+
+    Args:
+        folder (Path): The folder that `isolated` yielded.
+    """
+    for f in folder.glob("*.sqlite*"):
+        f.unlink()
 
 
 def module(component: str):
@@ -270,13 +322,13 @@ def print_scorecard() -> None:
     """Print the cached results as a table, grouped by component level."""
     rows = scorecard_rows()
     tiers = ["any", *config.TIERS]
-    print(f"\n{'level':11s} {'component':11s} {'metric':24s} {'threshold':10s} " + " ".join(f"{t:>16s}" for t in tiers))
-    print("-" * (60 + 17 * len(tiers)))
+    print(f"\n{'level':11s} {'component':13s} {'metric':24s} {'threshold':10s} " + " ".join(f"{t:>16s}" for t in tiers))
+    print("-" * (62 + 17 * len(tiers)))
     for level in ("component", "end-to-end"):
         for r in [r for r in rows if r["level"] == level]:
             cells = " ".join(_scorecard_cell(r.get(t)) for t in tiers)
             print(
-                f"{level:11s} {r['component']:11s} {r['metric']:24s} {r.get('threshold', ''):10s} "
+                f"{level:11s} {r['component']:13s} {r['metric']:24s} {r.get('threshold', ''):10s} "
                 + (cells if r.get("status") != "not run" else "   (not run: python cli.py evals --run)")
             )
     print()

@@ -284,6 +284,95 @@ def add_screen(a: argparse.Namespace) -> str:
     return f"{a.name} labeled with {len(moments)} key moments"
 
 
+def add_multimodal(a: argparse.Namespace) -> str:
+    """Add a screenshot or a speech clip, and the text queries that must find it.
+
+    Args:
+        a (argparse.Namespace): `media` (PNG/JPG or audio file) and `query` (list of queries).
+
+    Returns:
+        str: What was added.
+    """
+    is_image = a.media.suffix.lower() in (".png", ".jpg", ".jpeg")
+    saved = save_media("multimodal", a.media) if is_image else save_audio("multimodal", a.media)
+    with (folder("multimodal") / "queries.jsonl").open("a") as f:
+        for q in a.query:
+            f.write(json.dumps({"query": q, "item": saved.name, "modality": "image" if is_image else "audio"}) + "\n")
+    return f"{saved.name} added to multimodal with {len(a.query)} queries"
+
+
+def add_consolidation(a: argparse.Namespace) -> str:
+    """Add a day log in the consolidation format (see evals/consolidation/eval.py), after checking it.
+
+    Args:
+        a (argparse.Namespace): `log`, a JSON file with `rows` and `queries`.
+
+    Returns:
+        str: What was added.
+
+    Raises:
+        SystemExit: If the file does not have the format.
+    """
+    data = json.loads(a.log.read_text())
+    rows = data.get("rows", [])
+    if not rows or not all({"at", "kind", "text"} <= set(r) for r in rows):
+        raise SystemExit('each row needs "at" (HH:MM), "kind" and "text"')
+    if any(i >= len(rows) for q in data.get("queries", []) for i in q["relevant"]):
+        raise SystemExit("a query names a row number that the log does not have")
+    stem = new_stem("consolidation")
+    (folder("consolidation") / f"{stem}.json").write_text(json.dumps(data, indent=1))
+    return f"{stem} added to consolidation ({len(rows)} rows, {len(data.get('queries', []))} queries)"
+
+
+def add_task3(a: argparse.Namespace) -> str:
+    """Add a recording with one question about it, or one more question to a recording you added.
+
+    Args:
+        a (argparse.Namespace): `audio` or `to` (an earlier id), `start`, `ask_at`, `question`, `mention`, `unanswerable`.
+
+    Returns:
+        str: What was added.
+
+    Raises:
+        SystemExit: If neither a recording nor an earlier id is given.
+    """
+    if a.audio:
+        case_file = save_audio("task3", a.audio).with_suffix(".json")
+        case = {"start": a.start, "ask_at": a.ask_at, "questions": []}
+    elif a.to and (folder("task3") / f"{a.to}.json").exists():
+        case_file = folder("task3") / f"{a.to}.json"
+        case = json.loads(case_file.read_text())
+    else:
+        raise SystemExit("give a recording, or --to ID of a recording you added")
+    groups = [[p.strip() for p in g.split("|") if p.strip()] for g in a.mention]
+    case["questions"].append({"question": a.question, "must_mention": groups, "unanswerable": a.unanswerable})
+    case_file.write_text(json.dumps(case, indent=1))
+    return f"{case_file.stem} in task3 now has {len(case['questions'])} questions"
+
+
+def add_task4(a: argparse.Namespace) -> str:
+    """Add a brief day (its memories, dev or test) or one of your preferences.
+
+    A preference you add has no code check, so the eval asks Gemma whether a brief follows it.
+
+    Args:
+        a (argparse.Namespace): `memory` (list) with `split`, or `prefer` with `complaint`.
+
+    Returns:
+        str: What was added.
+
+    Raises:
+        SystemExit: If neither is given.
+    """
+    if a.prefer:
+        row = {"text": a.prefer, "complaint": a.complaint or a.prefer}
+        return f"{append_jsonl('task4', 'preferences.jsonl', row)} added to task4 preferences (judged by Gemma)"
+    if not a.memory:
+        raise SystemExit("give --memory lines for a day, or --prefer for a preference")
+    case_id = append_jsonl("task4", "days.jsonl", {"split": a.split, "memories": a.memory})
+    return f"{case_id} added to task4 as a {a.split} day ({len(a.memory)} memories)"
+
+
 def _json_arg(text: str) -> dict:
     """Parse a JSON object given on the command line."""
     value = json.loads(text)
@@ -341,21 +430,48 @@ def _add_parsers(sub) -> None:
     p.add_argument("name")
     p.add_argument("--moment", nargs=2, action="append", required=True, metavar=("SECONDS", "LABEL"))
     p.set_defaults(handler=add_screen)
+    _add_session2_parsers(sub)
+
+
+def _add_session2_parsers(sub) -> None:
+    """Register the `add <component>` commands of the Session 2 evals."""
+    p = sub.add_parser("multimodal", help="a screenshot or clip, and text queries that must find it")
+    p.add_argument("media", type=Path)
+    p.add_argument("--query", action="append", required=True, help="a query that should find it; repeat for more")
+    p.set_defaults(handler=add_multimodal)
+    p = sub.add_parser("consolidation", help="a day log with queries (JSON, format in evals/consolidation/eval.py)")
+    p.add_argument("log", type=Path)
+    p.set_defaults(handler=add_consolidation)
+    p = sub.add_parser("task3", help="a recording and a question about it")
+    p.add_argument("audio", type=Path, nargs="?")
+    p.add_argument("--to", help="add the question to a recording you added before (its id, e.g. u001)")
+    p.add_argument("--start", default="09:00", help="local time the recording starts at")
+    p.add_argument("--ask-at", default="14:00", help="local time the question is asked at")
+    p.add_argument("--question", required=True)
+    p.add_argument("--mention", action="append", default=[], help="phrases of which one must appear; separate with |")
+    p.add_argument("--unanswerable", action="store_true", help="nobody said it: the right answer is 'I do not know'")
+    p.set_defaults(handler=add_task3)
+    p = sub.add_parser("task4", help="a brief day (its memories) or one of your preferences")
+    p.add_argument("--memory", action="append", default=[], help='a memory line, e.g. "(09:00, fact) ..."; repeat')
+    p.add_argument("--split", choices=("dev", "test"), default="test", help="dev days get feedback, test days do not")
+    p.add_argument("--prefer", help="a preference, in your words")
+    p.add_argument("--complaint", help="what you would say when a brief breaks it")
+    p.set_defaults(handler=add_task4)
 
 
 def print_status() -> None:
     """Print, for each eval, how many synthetic and user cases it has and when it last ran."""
-    print(f"{'component':11s} {'synthetic':>9s} {'user':>5s}   last run")
+    print(f"{'component':13s} {'synthetic':>9s} {'user':>5s}   last run")
     for c in common.COMPONENTS:
         mod = common.module(c)
         counts = common.case_counts(c)
         cached = common.cached_results(c, mod)
         last = ", ".join(f"{t} {r['when']} (n={r['n']})" for t, r in cached.items()) or "never"
         if getattr(mod, "BUILTIN", False):
-            print(f"{c:11s} {'built in':>9s} {'-':>5s}   {last}")
+            print(f"{c:13s} {'built in':>9s} {'-':>5s}   {last}")
             continue
         synthetic = str(counts["synthetic"]) if counts["synthetic"] else "not built"
-        print(f"{c:11s} {synthetic:>9s} {counts['user']:>5d}   {last}")
+        print(f"{c:13s} {synthetic:>9s} {counts['user']:>5d}   {last}")
 
 
 def build_synthetic(components: list[str]) -> None:

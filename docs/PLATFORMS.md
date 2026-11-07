@@ -39,14 +39,19 @@ Add yourself to the table in your PR.
 
 ## What each OS hook must do
 
-`agent/platforms/base.py` defines these hooks. `doctor` checks the first three:
+`agent/platforms/base.py` defines these hooks. `doctor` checks the ones in `HOOKS`, and `doctor --exercise` runs
+all of them except autostart, which changes your login items:
 
 | Hook | Contract |
 |---|---|
 | `record_screen(out, seconds)` | Record the main display to the file `out` (container: `raw_video_suffix`). ffmpeg is fine. |
-| `synthesize_speech(text, out)` | Write spoken text to an audio file that soundfile can read, and return its path. The smoke test and the synthetic eval cases (asr, vad, task1, structured) use it; without it those evals skip. |
+| `synthesize_speech(text, out, voice=0)` | Write spoken text to an audio file that soundfile can read, and return its path. `voice` picks the n-th distinct voice; wrap around if you have fewer. The smoke test and the synthetic eval cases (asr, vad, task1, structured, task3, multimodal) use it; without it those evals skip. |
 | `start_hotkey(combo, on_press)` | Default uses pynput. Override where pynput does not work, for example on Wayland. |
 | `hotkey_warning()` | Return a message if the OS will silently drop key events. |
+| `keep_awake()` | Session 2. Stop idle sleep while the daemon runs. Return an object with `.stop()`. The block must end by itself when the process dies. macOS: `caffeinate -i -w <pid>`. |
+| `notify(title, message)` | Session 2. Show a desktop notification. Pass the strings as arguments, never as script text. macOS: `osascript` with `on run argv`. |
+| `install_autostart(label, cmd, cwd, log)` / `uninstall_autostart(label)` | Session 2. Start the daemon at login and after a crash, but not after a clean exit. macOS: a LaunchAgent with `KeepAlive.SuccessfulExit = false`. On Linux, a systemd user unit can do it. |
+| `spawn_background(cmd, cwd, log)` | Session 2. Start a detached process (`daemon start`). The default (`start_new_session`) works on macOS and Linux. |
 | `install_hint(tool)` | One line to install a tool such as ffmpeg (`brew install ffmpeg`, `sudo apt install ffmpeg`...). |
 | `venv_python(venv)` | Path to the venv's Python. |
 | facts | `exe_suffix`, `raw_video_suffix`, `monospace_font`, `screen_blank_hint`, `permission_notes()` |
@@ -61,3 +66,4 @@ Defined in `agent/accel/base.py`:
 | `downloads` | `{platform_name: Download(url, sha256, archive, bin_subdir)}` for the pinned llama.cpp build. The sha256 must come from the file you tested. |
 | `server_args()` | Extra `llama-server` flags, for example `["-ngl", "99"]`. |
 | `server_memory_gb(processes)` | Memory the servers hold. Discrete GPUs: read VRAM from the driver, because RSS does not include it. |
+| `stt_pins` and `transcribe(samples, language)` | Session 2. A speech model for always-on listening: its pinned files (setup group `whisper`) and the call that turns 16 kHz audio into text. Metal: mlx-whisper with Whisper large-v3-turbo. Without it, set `config.STT_ENGINE = "gemma"`; the asr eval then reports Gemma only. |

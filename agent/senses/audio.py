@@ -46,10 +46,34 @@ def to_wav_bytes(samples: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+def paused() -> bool:
+    """Return True if the global microphone pause switch is on.
+
+    The switch is a file, so the dashboard, the CLI and the daemon (separate processes) all see it.
+
+    Returns:
+        bool: True when no process may record.
+    """
+    return (config.RUNTIME / "mic.paused").exists()
+
+
+def set_paused(on: bool) -> None:
+    """Turn the global microphone pause switch on or off, for every process.
+
+    Args:
+        on (bool): True to pause recording everywhere.
+    """
+    marker = config.RUNTIME / "mic.paused"
+    config.RUNTIME.mkdir(parents=True, exist_ok=True)
+    if on:
+        marker.touch()
+    else:
+        marker.unlink(missing_ok=True)
+    events.emit("senses.mic", state="paused" if on else "unpaused")
+
+
 class Mic:
     """Record from the default input device until stop(). Respects the pause switch."""
-
-    paused = False  # the global "ambient listening" switch (dashboard + CLI)
 
     def __init__(self):
         """Create an idle microphone recorder."""
@@ -61,9 +85,9 @@ class Mic:
         """Open the default input device and start recording.
 
         Raises:
-            RuntimeError: If the global pause switch (`Mic.paused`) is on.
+            RuntimeError: If the global pause switch (`paused()`) is on.
         """
-        if Mic.paused:
+        if paused():
             raise RuntimeError("Microphone is paused")
         self._frames = []
         self._stream = sd.InputStream(samplerate=SR, channels=1, dtype="float32", callback=self._on_audio)

@@ -3,6 +3,7 @@
 A personal agent that listens, sees, remembers and acts, entirely on the device. Inputs flow through senses and tasks
 into the brain. The brain talks to a local `llama-server` running Gemma 4, with memory and a permissioned tool registry
 on the side. The numbers in the diagram match the Session 1 segments in [Where each segment lives](#where-each-segment-lives).
+Session 2 adds a daemon process around this core. See [Session 2: always on and learning](#session-2-always-on-and-learning).
 
 ## Diagram
 
@@ -72,7 +73,7 @@ flowchart TB
 | Screen | A screenshot or a screen recording |
 | Hotkey | A global key combination, ctrl+alt+space. The OS plug-in provides it. |
 | CLI, `cli.py` | `serve`, `stop`, `dashboard`, `hotkey`, `note`, `look`, `chat`, `memory`, `record-clip`, `record-screen`, `smoke`, `doctor`, `evals` |
-| Dashboard | FastAPI on port 8765 with 7 tabs: chat, memory, tool approval, model switch, benchmark, evals |
+| Dashboard | FastAPI on port 8765 with 9 tabs: chat, memory, tool approval, model switch, benchmark, daemon, evolution, tasks, evals |
 
 ### 1 Serving: `agent/serving.py`
 
@@ -137,8 +138,9 @@ guard keeps them inside the sandbox. The shell guard blocks risky commands.
 
 | Part | What it does |
 | ---- | ------------ |
-| `agent/events.py` | `events.emit(kind, ...)` from every component. An in-memory ring plus `data/runtime/events.jsonl`. The dashboard polls `/api/events`. |
-| `evals/` (7 Scorecard) | 10 components: `serving`, `vad`, `asr`, `screen`, `structured`, `tool_calls`, `memory`, `tools`, `task1`, `task2`. Synthetic cases and your cases in `data/evals/`, scored against `config.THRESHOLDS`. |
+| `agent/events.py` | `events.emit(kind, ...)` from every component. A SQLite table (`data/runtime/events.sqlite`), so the daemon, the dashboard and the CLI share one log, plus `events.jsonl`. Each event names its `source` process. The dashboard polls `/api/events`. |
+| `agent/sql.py` | Opens every SQLite file: commit, roll back, and always close. WAL mode lets one process read while another writes. |
+| `evals/` (9 Scorecard) | 15 components: the 10 of Session 1, plus `daemon`, `multimodal`, `consolidation`, `task3` and `task4`. Synthetic cases and your cases in `data/evals/`, scored against `config.THRESHOLDS`. |
 | `scripts/` | `setup.py` downloads and verifies pinned assets. `doctor.py` detects the OS and GPU and checks hooks. `smoke_test.py` runs end to end with real models. Run them through `cli.py doctor`, `smoke` and `evals`. |
 | `tests/` and gates | `unittest` contract tests with no model and no GPU. `ruff check` and `ruff format`, `pyright`, `complexipy`. `test_plugin_contract.py` keeps OS and GPU code out of core modules. |
 
@@ -153,7 +155,7 @@ guard keeps them inside the sandbox. The shell guard blocks risky commands.
 | 4 Memory v1 | `agent/memory/episodic.py` | `memory` |
 | 5 Tools, CLI, hotkey | `agent/tools/`, `cli.py`, `agent/hotkey.py` | `tools` |
 | 6 Live tasks | `agent/tasks.py` | `task1`, `task2` (end-to-end) |
-| 7 Scorecard | `evals/run_all.py`, dashboard tab 7 | n/a |
+| 7 Scorecard | `evals/run_all.py`, dashboard tab 9 | n/a |
 
 ## Portability layer
 
@@ -170,12 +172,13 @@ Each plug-in folder holds a contract, a verified reference and a template:
 
 | Folder | Contract | Verified reference | Template | Hooks |
 | ------ | -------- | ------------------ | -------- | ----- |
-| `agent/accel/` | `base.py`, `Accelerator` | `metal.py`, Apple Silicon | `_template.py`, for CUDA, Vulkan or CPU | `download_for`, `server_args`, `server_memory_gb` |
-| `agent/platforms/` | `base.py`, `Platform` and `Unsupported` | `macos.py` | `_template.py`, for Linux or Windows | `record_screen`, `synthesize_speech`, `start_hotkey` |
+| `agent/accel/` | `base.py`, `Accelerator` | `metal.py`, Apple Silicon | `_template.py`, for CUDA, Vulkan or CPU | `download_for`, `server_args`, `server_memory_gb`, `transcribe` (Session 2) |
+| `agent/platforms/` | `base.py`, `Platform` and `Unsupported` | `macos.py` | `_template.py`, for Linux or Windows | `record_screen`, `synthesize_speech`, `start_hotkey`, and for Session 2 `keep_awake`, `notify`, `install_autostart`, `uninstall_autostart`, `spawn_background` |
 
 Shared configuration: `config.py` holds ports, thresholds, paths and knobs, and `config.LLAMA_BUILD` pins the llama.cpp
 build. `pins.py` holds the sha256 of the model and VAD weights. The environment variables are `AGENT_TIER`,
-`AGENT_WORKSPACE`, `AGENT_PLATFORM` and `AGENT_ACCEL`.
+`AGENT_WORKSPACE`, `AGENT_PLATFORM`, `AGENT_ACCEL` and `AGENT_RUNTIME`. `AGENT_RUNTIME` moves `data/runtime/`; the daemon
+eval and the soak test use it to run a throwaway daemon.
 
 ## Data flow for one request
 
@@ -198,3 +201,83 @@ build. `pins.py` holds the sha256 of the model and VAD weights. The environment 
      happened.
    - A `blocked` call never runs.
    - When the retries for invalid calls run out, the loop stops and says so.
+
+## Session 2: always on and learning
+
+Session 2 turns the agent from something you call into something that runs all the time and improves from feedback.
+The daemon is its own process, so a kill -9 of the daemon leaves the dashboard up. The two processes share the SQLite
+files in `data/runtime/`: the event log, the checkpoints, the memory and the prompt versions.
+
+```mermaid
+flowchart TB
+    trig["Triggers<br/>config.SCHEDULE, many new transcripts,<br/>dashboard, cli.py"]
+    subgraph daemon["daemon process: agent/daemon.py"]
+        loop["Main loop<br/>due(), triggers(), claim_next()"]
+        jobs["Jobs<br/>consolidate, brief, reflect,<br/>forget, replay, prune_events"]
+        listen["Ambient listener<br/>agent/senses/ambient.py"]
+        beat["Heartbeat thread"]
+    end
+    ckpt["Checkpoints: agent/checkpoint.py<br/>checkpoints.sqlite<br/>intent, execution, result"]
+    stt["Speech to text: agent/senses/stt.py<br/>Whisper (accel hook) or Gemma"]
+    cons["Consolidation: agent/memory/consolidate.py<br/>raw to summaries to facts, forget()"]
+    mem["Memory: episodic.py<br/>levels, citations, image and audio vectors"]
+    evo["Self-evolution: agent/evolve.py<br/>locked blocks, versions, reflect(), rollback()"]
+    dash["Dashboard<br/>Always on, Evolve, Tasks 3 and 4"]
+    plat["agent/platforms/<br/>keep_awake, notify, autostart"]
+
+    trig --> loop
+    loop --> jobs
+    jobs <--> ckpt
+    listen --> stt --> mem
+    jobs --> cons --> mem
+    jobs --> evo
+    evo -- "brief from day_memories()" --> mem
+    beat --> ckpt
+    dash -- "queue a job, read state" --> ckpt
+    dash -- "feedback, rollback" --> evo
+    plat -. "OS hooks" .-> daemon
+
+    classDef store fill:#e6f5e5,stroke:#2e8b3d,color:#1d1d1b
+    classDef think fill:#e6effc,stroke:#2f6fd1,color:#1d1d1b
+    classDef sense fill:#e2f5ee,stroke:#12856a,color:#1d1d1b
+    classDef plugin fill:#eee9fb,stroke:#7048c9,stroke-dasharray:7 5,color:#1d1d1b
+    class ckpt,mem store
+    class cons,evo think
+    class listen,stt sense
+    class plat plugin
+```
+
+### Components
+
+| File | What it does |
+| ---- | ------------ |
+| `agent/daemon.py` | The main loop, once a second: queue the scheduled jobs that are due, check the triggers, run one job. A heartbeat thread writes "alive" every 5 s. On start, `checkpoint.recover()` re-queues the job that was running when the process died. Each finished job goes to the feed with its reason. |
+| `agent/checkpoint.py` | A job queue and a step log in SQLite. `step()` records intent, then execution, then the result. On a rerun, a step with a result returns the stored output and does not run again. |
+| `agent/senses/ambient.py` | `Segmenter` cuts a stream at pauses, while the audio arrives. `Listener` is the live microphone, and it closes the microphone when the pause switch is on. `utterances()` feeds a recording through the same Segmenter for a replay. |
+| `agent/senses/stt.py` | Speech to text for always-on listening: Whisper through the accelerator's `transcribe` hook, or Gemma 4. |
+| `agent/memory/consolidate.py` | Groups raw rows into 30-minute windows. One request per window writes claims and facts, and each one cites raw ids. Code drops invalid citations. `forget()` deletes covered raw rows after 7 days. `judge()` checks one claim against only the rows it cites. |
+| `agent/memory/episodic.py` | Adds a level (raw, summary, fact), `covered_by`, `superseded_by` and a second vector for the screenshot or the audio clip. `search()` takes a mode (text, media or both) and a time window. |
+| `agent/evolve.py` | The brief prompt: locked blocks in code, plus a style block and a preference list in versioned rows. `reflect()` asks for a patch, and `validate_patch()` refuses anything outside the editable parts. `rollback()` makes any version active. |
+| `agent/tasks.py` | Task 3, `recall()`: a time window from the question ("this morning"), a search, and an answer that cites memory ids. Task 4, `daily_brief()`: the day's summaries, facts, action items and screen episodes, written with the active prompt version. |
+| `dashboard/always_on.py` | The Session 2 endpoints. While the daemon runs, the dashboard queues jobs for it. Without a daemon, it runs them itself through the same handlers. |
+| `scripts/soak.py` | Runs a daemon for hours under load and records its memory and missed events. |
+
+### Where each Session 2 segment lives
+
+| Segment | Files | Eval (folder in `evals/`) |
+| ------- | ----- | ------------------------- |
+| 24/7 daemon | `agent/daemon.py`, `agent/checkpoint.py`, `scripts/soak.py`, keep-awake and autostart hooks | `daemon` |
+| Memory consolidation | `agent/memory/consolidate.py`, `agent/memory/episodic.py` | `consolidation`, `multimodal` |
+| Self-evolution | `agent/evolve.py`, dashboard tab 7 (prompt diff view) | `task4` |
+| Live tasks | `agent/tasks.py` (`recall`, `daily_brief`), `agent/senses/ambient.py`, `agent/senses/stt.py` | `task3`, `task4`, `asr` (Gemma and Whisper on the same clips) |
+
+### Data flow for one daemon job
+
+1. A trigger queues a job: the schedule, a count of new transcripts, the dashboard or `cli.py`. The job row holds its
+   kind, its inputs and the reason.
+2. The main loop claims the oldest queued job and marks it `running`.
+3. The handler runs each step through `checkpoint.step()`: intent, execution, then the result with its output.
+4. If the process dies, the next start puts the job back in the queue. Steps with a result are skipped; the step that
+   was in flight runs again. Steps must be safe to run twice. A summary, for example, is found again by its window key.
+5. The job ends `done` or `failed`. The `daemon.action` event carries the reason and a summary to the dashboard feed. A
+   finished brief also shows a desktop notification.

@@ -14,6 +14,17 @@
     python cli.py evals add -h                add your own eval case
     python cli.py doctor [--exercise]         which OS + accelerator plug-ins were detected, and do they work
 
+Session 2 (always on and learning):
+    python cli.py daemon start|run|stop|kill|status    the always-on process (kill = crash it, for the demo)
+    python cli.py daemon install|uninstall             start it at login (and after a crash)
+    python cli.py listen on|off                        always-on listening in the daemon
+    python cli.py replay morning.wav --at 09:00        Task 3: replay a recording as if it was heard live
+    python cli.py ask "what did I decide about the venue this morning?"     Task 3: answer from memory
+    python cli.py consolidate [--forget]               summarize raw memories now (and apply retention)
+    python cli.py brief                                Task 4: write today's brief
+    python cli.py feedback 3 --bad "too long"          Task 4: feedback on brief 3
+    python cli.py evolve reflect|versions|diff A B|rollback N|simulate --rounds 3
+
 Everything OS- or GPU-specific lives in agent/platforms/ and agent/accel/. Commands here call
 those plug-ins and never branch on the OS. Force a choice with AGENT_PLATFORM=<name> / AGENT_ACCEL=<name>.
 """
@@ -203,6 +214,218 @@ def cmd_record_screen(a):
     print(f'  python cli.py evals add screen {a.name} --moment 12.5 "error dialog appears"')
 
 
+# --- Session 2 -------------------------------------------------------------------
+
+
+def cmd_daemon(a):
+    """`daemon`: run, start, stop, kill, status, install or uninstall the always-on process.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `action` and `no_models`.
+    """
+    from agent import daemon, platforms
+
+    plat, st = platforms.current(), daemon.status()
+    cmd = [sys.executable, str(config.ROOT / "cli.py"), "daemon", "run"]
+    if a.action == "run":
+        daemon.Daemon(models=not a.no_models).run()
+    elif a.action == "start":
+        if st["alive"]:
+            return print(f"already running (pid {st['pid']})")
+        pid = plat.spawn_background(cmd, config.ROOT, config.DAEMON_LOG)
+        print(f"started (pid {pid}); log: {config.DAEMON_LOG}")
+    elif a.action in ("stop", "kill"):
+        stop_daemon(st, kill=a.action == "kill")
+    elif a.action == "install":
+        print(f"installed: {plat.install_autostart(config.AUTOSTART_LABEL, cmd, config.ROOT, config.DAEMON_LOG)}")
+    elif a.action == "uninstall":
+        print("removed" if plat.uninstall_autostart(config.AUTOSTART_LABEL) else "no login item was installed")
+    else:
+        show(st)
+
+
+def stop_daemon(st: dict, kill: bool) -> None:
+    """Stop the daemon cleanly (SIGTERM, it finishes the current job) or kill it (SIGKILL, a crash).
+
+    Args:
+        st (dict): The result of `daemon.status()`.
+        kill (bool): True to kill without cleanup, for the crash recovery demo.
+    """
+    import psutil
+
+    if not st["alive"]:
+        return print("not running")
+    proc = psutil.Process(st["pid"])
+    proc.kill() if kill else proc.terminate()
+    print(f"{'killed' if kill else 'stopping'} pid {st['pid']}")
+
+
+def cmd_listen(a):
+    """`listen`: ask the daemon to start or stop always-on listening.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `state`.
+    """
+    from agent import daemon
+
+    daemon.set_listening(a.state == "on")
+    st = daemon.status()
+    print(f"listening {a.state}" + ("" if st["alive"] else " (the daemon is not running: python cli.py daemon start)"))
+
+
+def at_today(hhmm: str | None) -> float:
+    """Turn "HH:MM" into today's epoch time, or return now.
+
+    Args:
+        hhmm (str | None): A local time such as "09:00".
+
+    Returns:
+        float: Epoch seconds.
+    """
+    import time
+
+    if not hhmm:
+        return time.time()
+    h, m = map(int, hhmm.split(":"))
+    return time.mktime(time.localtime()[:3] + (h, m, 0, 0, 0, -1))
+
+
+def cmd_replay(a):
+    """`replay`: Task 3, feed a recording to the ambient listener as if it was heard live.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `path`, `at` and `speed`.
+    """
+    from agent import daemon
+
+    args = {"path": str(Path(a.path).resolve()), "start_ts": at_today(a.at), "speed": a.speed}
+    if not daemon.status()["alive"]:
+        start_servers()
+    out = daemon.run_or_queue("replay", args, f"replay of {Path(a.path).name} from the CLI")
+    if out["queued"]:
+        return print(f"queued job {out['job_id']} in the daemon; watch the dashboard feed")
+    print(f"job {out['job_id']}: {out['job']['status']}")
+
+
+def cmd_ask(a):
+    """`ask`: Task 3, answer a question about earlier events from memory.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `question`.
+    """
+    from agent import tasks
+
+    start_servers()
+    r = tasks.recall(a.question)
+    print(r["answer"])
+    for m in r["memories"]:
+        print(f"  {'*' if m['id'] in r['memory_ids'] else ' '} [{m['id']}] {m['text'][:100]}")
+
+
+def cmd_consolidate(a):
+    """`consolidate`: summarize the raw memories now, and with `--forget` apply the retention rule.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `forget`.
+    """
+    from agent.memory import consolidate
+
+    start_servers()
+    for r in consolidate.consolidate(force=True):
+        print(f"summary {r['summary_id']}: {len(r['claims'])} claims, facts {r['fact_ids']}")
+    if a.forget:
+        show(consolidate.forget())
+    show(consolidate.stats())
+
+
+def cmd_brief(_a):
+    """`brief`: Task 4, write today's brief with the active prompt version."""
+    from agent import tasks
+
+    start_servers()
+    r = tasks.daily_brief()
+    print(f"brief {r['brief_id']} (prompt v{r['version']})\n\n{r['markdown']}")
+    print(f'\nGive feedback: python cli.py feedback {r["brief_id"]} --bad "what to change"')
+
+
+def cmd_feedback(a):
+    """`feedback`: Task 4, record your feedback on a brief.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `brief_id`, `good` and `bad`.
+    """
+    from agent import evolve
+
+    rating, text = (1, a.good) if a.good is not None else (-1, a.bad)
+    fid = evolve.add_feedback(a.brief_id, rating, text or "")
+    print(f"feedback {fid} saved. Reflect on it: python cli.py evolve reflect")
+
+
+def cmd_evolve(a):
+    """`evolve`: reflect on feedback, list versions, show a diff, roll back, or run simulated rounds.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `action`, `ids` and `rounds`.
+    """
+    from agent import evolve
+
+    if a.action == "versions":
+        for v in evolve.versions():
+            print(f"{'*' if v['active'] else ' '} v{v['id']} from v{v['parent']} [{v['source']}] {v['reason'][:80]}")
+    elif a.action == "diff":
+        print(evolve.diff(*(a.ids or [get_parent(evolve), evolve.get_version()["id"]])))
+    elif a.action == "rollback":
+        print(f"active: v{evolve.rollback(a.ids[0])['id']}")
+    elif a.action == "simulate":
+        from evals.task4 import simulate
+
+        start_servers()
+        show(simulate.rounds_into_real_db(a.rounds))
+    else:
+        start_servers()
+        show(evolve.reflect())
+
+
+def get_parent(evolve) -> int:
+    """Return the parent of the active version, or the active version itself when it has none."""
+    v = evolve.get_version()
+    return v["parent"] or v["id"]
+
+
+def _session2_parsers(sub) -> None:
+    """Register the Session 2 commands."""
+    p = sub.add_parser("daemon", help="the always-on process")
+    p.add_argument("action", choices=["run", "start", "stop", "kill", "status", "install", "uninstall"])
+    p.add_argument("--no-models", action="store_true", help="do not start model servers (the daemon eval uses it)")
+    p.set_defaults(fn=cmd_daemon)
+    p = sub.add_parser("listen", help="always-on listening in the daemon")
+    p.add_argument("state", choices=["on", "off"])
+    p.set_defaults(fn=cmd_listen)
+    p = sub.add_parser("replay", help="Task 3: replay a recording through the ambient listener")
+    p.add_argument("path")
+    p.add_argument("--at", help="local time the recording started, e.g. 09:00 (default: now)")
+    p.add_argument("--speed", type=float, default=0, help="1 = real time, 4 = four times faster, 0 = no waiting")
+    p.set_defaults(fn=cmd_replay)
+    p = sub.add_parser("ask", help="Task 3: answer a question about earlier events")
+    p.add_argument("question")
+    p.set_defaults(fn=cmd_ask)
+    p = sub.add_parser("consolidate", help="summarize raw memories now")
+    p.add_argument("--forget", action="store_true", help="also delete covered raw rows past the retention time")
+    p.set_defaults(fn=cmd_consolidate)
+    sub.add_parser("brief", help="Task 4: write today's brief").set_defaults(fn=cmd_brief)
+    p = sub.add_parser("feedback", help="Task 4: feedback on a brief")
+    p.add_argument("brief_id", type=int)
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--good", nargs="?", const="", help="what was good (optional text)")
+    g.add_argument("--bad", help="what to change")
+    p.set_defaults(fn=cmd_feedback)
+    p = sub.add_parser("evolve", help="Task 4: self-evolution of the brief prompt")
+    p.add_argument("action", choices=["reflect", "versions", "diff", "rollback", "simulate"])
+    p.add_argument("ids", nargs="*", type=int, help="diff: two versions; rollback: one version")
+    p.add_argument("--rounds", type=int, default=3, help="simulate: feedback rounds from the simulated user")
+    p.set_defaults(fn=cmd_evolve)
+
+
 def main():
     """Parse the command line and run the chosen command."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -235,6 +458,7 @@ def main():
     p.add_argument("--seconds", type=float, default=60)
     p.add_argument("--fps", type=float, default=2)
     p.set_defaults(fn=cmd_record_screen)
+    _session2_parsers(sub)
     sub.add_parser("smoke", add_help=False).set_defaults(
         fn=lambda a: sys.exit(subprocess.call([sys.executable, "scripts/smoke_test.py", *a.rest]))
     )
@@ -246,7 +470,12 @@ def main():
     )
     a, rest = ap.parse_known_args()
     a.rest = rest
-    a.fn(a)
+    from agent.platforms import Unsupported
+
+    try:
+        a.fn(a)
+    except Unsupported as e:  # a hook this machine's plug-in lacks: say which file to add, not a traceback
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

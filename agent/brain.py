@@ -192,8 +192,11 @@ def ask_json(user: list[dict], schema: dict, system: str | None = None, retries:
     """Ask for JSON matching `schema`. Returns (data or None, info)."""
     msgs, used = fit_budget(system or system_prompt(), [], [], user)
     fmt = {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}}
+    # With thinking off, E4B still wrote a 3,100-character plan into reasoning_content on a long summary
+    # and ran out of tokens before the JSON ended. A thinking budget of 0 stops that. See docs/VERIFICATION.md.
+    params = {} if config.THINKING else {"thinking_budget_tokens": 0}
     for attempt in range(retries + 1):
-        content = send(msgs, response_format=fmt)["choices"][0]["message"].get("content") or ""
+        content = send(msgs, response_format=fmt, **params)["choices"][0]["message"].get("content") or ""
         try:
             data = json.loads(content)
             jsonschema.validate(data, schema)

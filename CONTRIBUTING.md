@@ -14,7 +14,10 @@ which plug-ins it detected and which hooks are missing for your machine.
 3. Implement what you can: `record_screen`, `synthesize_speech`, and the optional overrides
    (`venv_python`, `install_hint`, `start_hotkey`, `hotkey_warning`, `permission_notes`, the facts).
    Delete the hooks you do not implement: the base class then raises a clear `Unsupported`.
-   `synthesize_speech` also builds the synthetic audio cases of the evals; without it `asr`, `vad` and `task1` skip.
+   `synthesize_speech` also builds the synthetic audio cases of the evals; without it `asr`, `vad`, `task1`,
+   `task3` and `multimodal` skip.
+   The Session 2 hooks (`keep_awake`, `notify`, `install_autostart`, `uninstall_autostart`) make the daemon
+   pleasant to run. The daemon still runs without them, and it reports each missing hook in its event log.
 4. Import OS-specific packages **inside** the method that uses them. The file must import on every OS.
 5. If the portable packages in `requirements/base.txt` are not enough, put OS-only packages in
    `requirements/lock-<name>.txt` (full `pip freeze` of an environment where everything works).
@@ -28,7 +31,9 @@ which plug-ins it detected and which hooks are missing for your machine.
    holds `llama-server`. Compute the checksum on the file you ran. Never copy one you did not verify.
 4. Override `server_args()` if the backend needs flags, for example layer offload. Override
    `server_memory_gb()` if weights live in VRAM. The serving eval then measures the right thing.
-5. If no prebuilt binary exists for your combination, say so in the PR. Building from source is a
+5. Optional, Session 2: add `stt_pins` and `transcribe()` for a speech model that runs well on your backend
+   (for example faster-whisper on CUDA). Without them, `config.STT_ENGINE = "gemma"` keeps always-on listening working.
+6. If no prebuilt binary exists for your combination, say so in the PR. Building from source is a
    hook that does not exist yet: propose it in the PR by adding it to `agent/accel/base.py`.
 
 ## Before you open the PR

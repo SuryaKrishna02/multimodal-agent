@@ -37,8 +37,10 @@
       <button role="tab" data-tab="brain"><span class="tab-title"><kbd>3</kbd>Brain<i class="ping" data-activity="brain"></i></span><span class="tab-sub">Inside a request</span></button>
       <button role="tab" data-tab="memory"><span class="tab-title"><kbd>4</kbd>Memory<i class="ping" data-activity="memory"></i></span><span class="tab-sub">What it recalls</span></button>
       <button role="tab" data-tab="tools"><span class="tab-title"><kbd>5</kbd>Tools<i class="ping" data-activity="tools"></i><span id="tools-badge" class="badge" hidden></span></span><span class="tab-sub">What it can do</span></button>
-      <button role="tab" data-tab="tasks"><span class="tab-title"><kbd>6</kbd>Tasks<i class="ping" data-activity="tasks"></i></span><span class="tab-sub">Run the agent</span></button>
-      <button role="tab" data-tab="scorecard"><span class="tab-title"><kbd>7</kbd>Scorecard</span><span class="tab-sub">How well it works</span></button>
+      <button role="tab" data-tab="daemon"><span class="tab-title"><kbd>6</kbd>Always on<i class="ping" data-activity="daemon"></i><i id="daemon-dot" class="dot" title="Daemon"></i></span><span class="tab-sub">Runs on its own</span></button>
+      <button role="tab" data-tab="evolve"><span class="tab-title"><kbd>7</kbd>Evolve<i class="ping" data-activity="evolve"></i></span><span class="tab-sub">Learns from you</span></button>
+      <button role="tab" data-tab="tasks"><span class="tab-title"><kbd>8</kbd>Tasks<i class="ping" data-activity="tasks"></i></span><span class="tab-sub">Run the agent</span></button>
+      <button role="tab" data-tab="scorecard"><span class="tab-title"><kbd>9</kbd>Scorecard</span><span class="tab-sub">How well it works</span></button>
     </div>
 
     <div class="panel" id="panel-serving" role="tabpanel">
@@ -120,9 +122,18 @@
         <p>Long-term notes the agent can recall later. It searches by meaning, so the words do not have to match.</p></div>
       <div class="card"><h3>Search by meaning</h3>
         <form id="mem-form" class="row"><input id="mem-q" aria-label="Search memories" placeholder="For example: what do I need to do tomorrow?">
+          <select id="mem-mode" aria-label="Which vectors to compare" title="Text vectors, image/audio vectors, or the better of the two">
+            <option value="both">Text + media</option><option value="text">Text only</option><option value="media">Media only</option></select>
           <button class="primary">Search</button></form>
         <div id="mem-hits"></div></div>
-      <div class="card"><h3><span>All memories <span id="mem-count" class="muted"></span></span><button id="mem-clear" class="small danger head-action">Clear all</button></h3>
+      <div class="card"><h3>Consolidation: raw to summaries to facts
+          <span class="head-action"><button id="consolidate-btn" class="small primary" data-busy="Summarizing…">Summarize now</button>
+          <button id="forget-btn" class="small" data-busy="Forgetting…" title="Delete raw rows that a summary covers once they are older than the retention time">Apply retention</button></span></h3>
+        <p class="hint">Raw rows come from the senses and the tasks. A summary covers a stretch of raw rows, and every claim in it cites them. Facts outlive the day; a newer fact can replace an older one.</p>
+        <div id="mem-levels" class="tiles"></div></div>
+      <div class="card"><h3><span>All memories <span id="mem-count" class="muted"></span></span>
+          <span class="head-action"><select id="mem-level" aria-label="Show level"><option value="">All levels</option><option value="raw">Raw</option><option value="summary">Summaries</option><option value="fact">Facts</option></select>
+          <button id="mem-clear" class="small danger">Clear all</button></span></h3>
         <div id="mem-all"></div></div>
       <div class="card"><h3>Refused by the junk filter</h3>
         <p class="hint">Things the agent chose not to keep, with the reason.</p>
@@ -148,8 +159,42 @@
         <div class="table-wrap"><table id="tool-list"><thead class="sr-only"><tr><th>Tool</th><th>Checks</th><th>What it does</th></tr></thead><tbody></tbody></table></div></div>
     </div>
 
+    <div class="panel" id="panel-daemon" role="tabpanel">
+      <div class="page-head"><h2>Always on</h2>
+        <p>The daemon is its own process. It runs jobs from a queue, on a schedule and on triggers, and writes every step down
+          (intent, execution, result), so a crash loses nothing. Start it with <code>python cli.py daemon start</code> or the button.</p></div>
+      <div class="card"><h3>Daemon <span id="daemon-state" class="muted"></span>
+          <span class="head-action"><button id="daemon-start" class="small primary" data-busy="Starting…">Start</button>
+          <button id="daemon-stop" class="small" data-busy="Stopping…">Stop</button>
+          <button id="daemon-kill" class="small danger" data-busy="Killing…" title="SIGKILL: no cleanup runs, as in a crash. Start it again to see it resume.">Kill (crash test)</button></span></h3>
+        <div id="daemon-tiles" class="tiles"></div>
+        <div class="row" style="margin-top:12px"><button id="listen-switch" class="mic paused" role="switch" aria-checked="false">Always-on listening off</button>
+          <span class="hint">The daemon transcribes what it hears with Whisper and stores it as raw memories. The Mic switch at the top still pauses it.</span></div></div>
+      <div class="card"><h3>What the agent did on its own</h3>
+        <p class="hint">Every job the daemon finished, with the reason it ran: a schedule, a trigger, a recovered crash, or you.</p>
+        <div id="daemon-feed"></div></div>
+      <div class="card"><h3>Jobs and checkpoints</h3>
+        <p class="hint">Open a job to see each step in three phases. After a kill, the finished steps of the recovered job are skipped, not run again.</p>
+        <div id="daemon-jobs"></div></div>
+      <div class="card"><h3>Schedule</h3><div id="daemon-schedule"></div></div>
+    </div>
+
+    <div class="panel" id="panel-evolve" role="tabpanel">
+      <div class="page-head"><h2>Evolve</h2>
+        <p>The daily brief learns from your feedback. A reflection step reads the feedback and patches only the editable blocks of its prompt.
+          Every patch is a new version, so you can roll back to any version. Locked blocks live in code and are checked on every version.</p></div>
+      <div class="card"><h3>Active prompt <span id="evolve-version" class="muted"></span><span id="evolve-locked" class="head-action"></span></h3>
+        <div id="evolve-prompt"></div></div>
+      <div class="card"><h3>Versions <span class="head-action"><button id="reflect-btn" class="small primary" data-busy="Reflecting…">Reflect on feedback now</button></span></h3>
+        <p class="hint" id="evolve-pending"></p>
+        <div id="evolve-versions"></div></div>
+      <div class="card" id="evolve-diff-card" hidden><h3>What changed <span id="evolve-diff-label" class="muted"></span></h3><div id="evolve-diff"></div></div>
+      <div class="card"><h3>Feedback</h3><p class="hint">"simulated" rows come from the code-checkable user of the Task 4 eval, never from a person.</p>
+        <div id="evolve-feedback"></div></div>
+    </div>
+
     <div class="panel" id="panel-tasks" role="tabpanel">
-      <div class="page-head"><h2>Tasks</h2><p>The two jobs this agent is built to do. Everything on the other tabs comes together here.</p></div>
+      <div class="page-head"><h2>Tasks</h2><p>The jobs this agent is built to do. Everything on the other tabs comes together here.</p></div>
       <div class="card"><h3>Task 1: voice note to action items</h3>
         <p class="hint">Speak, stop, and get a transcript with a list of what to do. Both are saved to memory.</p>
         <div class="row"><button id="rec-btn2" class="primary">Record voice note</button>
@@ -164,6 +209,21 @@
           <label class="file">Upload video<input type="file" id="video-file" accept="video/*"></label></div>
         <p id="hotkey-tip" class="tip" hidden></p>
         <div id="task2-out" class="result"></div></div>
+      <div class="card"><h3>Task 3: ambient listener with recall</h3>
+        <p class="hint">Turn on always-on listening in the Always on tab, or replay the recorded morning conversation as if it started at 09:00. Then ask about it.</p>
+        <div class="row"><button id="replay-btn" class="primary" data-busy="Replaying…">Replay the morning conversation</button>
+          <label class="field" for="replay-speed">Speed <select id="replay-speed"><option value="0">no waiting</option><option value="4">4× real time</option><option value="1">real time</option></select></label></div>
+        <div id="task3-heard" class="heard"></div>
+        <form id="ask-form" class="row" style="margin-top:10px"><input id="ask-q" aria-label="Question about earlier events" placeholder="What did we decide about the offsite venue this morning?">
+          <button class="primary" data-busy="Thinking…">Ask</button></form>
+        <div id="task3-out" class="result"></div></div>
+      <div class="card"><h3>Task 4: self-improving daily brief</h3>
+        <p class="hint">Writes today's brief from summaries, facts, action items and screen episodes, with the active prompt version. Tell it what to change, then reflect.</p>
+        <div class="row"><button id="brief-btn" class="primary" data-busy="Writing…">Write today's brief</button></div>
+        <div id="task4-out" class="result"></div>
+        <form id="feedback-form" class="row" hidden style="margin-top:10px"><input id="feedback-text" aria-label="Feedback" placeholder="For example: too long, and put the deadlines first">
+          <button type="button" data-rating="1">👍 Good</button><button type="button" data-rating="-1" class="primary">Send feedback</button></form>
+        <div id="task4-reflect" class="result"></div></div>
     </div>
 
     <div class="panel" id="panel-scorecard" role="tabpanel">
@@ -212,5 +272,6 @@
 <dialog id="lightbox" aria-label="Enlarged image"><img alt=""></dialog>
 <output id="toast"></output>
 <script src="/static/app.js"></script>
+<script src="/static/always_on.js"></script>
 </body>
 </html>

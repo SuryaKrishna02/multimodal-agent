@@ -53,9 +53,9 @@ def main():
         for c in args.run or common.COMPONENTS:
             try:
                 r = common.run(c, args.cases_dir, args.limit, verbose=True)
-                print(f"{c:11s} n={r['n']:<3d} {r['seconds']:6.1f}s  {r['sources']}  {r['metrics']}")
+                print(f"{c:13s} n={r['n']:<3d} {r['seconds']:6.1f}s  {r['sources']}  {r['metrics']}")
             except common.NoCases as e:
-                print(f"{c:11s} skipped: {e}")
+                print(f"{c:13s} skipped: {e}")
     common.print_scorecard()
 
 

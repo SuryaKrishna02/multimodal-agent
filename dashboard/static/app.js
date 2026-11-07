@@ -119,7 +119,8 @@ document.addEventListener("click", (e) => {
 });
 $("#lightbox").onclick = () => $("#lightbox").close();
 
-// --- Tabs (keys 1-7 switch tabs when you are not typing) --------------------
+// --- Tabs (keys 1-9 switch tabs when you are not typing) --------------------
+const TAB_REFRESH = {};   // tab name -> function that reloads it when shown (always_on.js adds some)
 const TABS = $$("#tabs button");
 function showTab(name) {
   if (!$("#panel-" + name)) name = "serving";
@@ -135,6 +136,7 @@ function showTab(name) {
   if (name === "memory") refreshMemory();
   if (name === "tools") refreshTools();
   if (name === "scorecard") refreshScorecard();
+  TAB_REFRESH[name]?.();
 }
 const isTab = (name) => $("#panel-" + name).classList.contains("active");
 TABS.forEach((b, i) => {
@@ -281,7 +283,8 @@ function describe(e) {
   if (fn) { try { return fn(e); } catch { /* an event with an older shape: fall through to the raw fields */ } }
   return `${e.kind} ${short(JSON.stringify(fieldsOf(e)), 200)}`;
 }
-const TAB_OF = { serving: "serving", senses: "senses", brain: "brain", memory: "memory", tools: "tools", task1: "tasks", task2: "tasks", hotkey: "tasks" };
+const TAB_OF = { serving: "serving", senses: "senses", brain: "brain", memory: "memory", tools: "tools", task1: "tasks", task2: "tasks", hotkey: "tasks",
+  daemon: "daemon", checkpoint: "daemon", evolve: "evolve", task3: "tasks" };
 const groupOf = (kind) => TAB_OF[kind.split(".")[0]] || "other";
 const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -303,7 +306,7 @@ $("#drawer-bar").onclick = () => setDrawer(!$("#drawer").classList.contains("ope
 
 let eventGroup = "all";
 const openEvents = new Set();
-$("#event-chips").innerHTML = ["all", "serving", "senses", "brain", "memory", "tools", "tasks"].map((g) =>
+$("#event-chips").innerHTML = ["all", "serving", "senses", "brain", "memory", "tools", "daemon", "evolve", "tasks"].map((g) =>
   `<button type="button" data-group="${g}"${g === "all" ? ' class="active"' : ""}>${titleCase(g)}</button>`).join("");
 $("#event-chips").onclick = (e) => {
   const g = e.target.dataset.group;
@@ -709,7 +712,7 @@ $("#img-file").onchange = sendFile("/api/task2/file", "#task2-out", "Looking at 
 $("#video-file").onchange = sendFile("/api/task2/video_file", "#task2-out", "Watching the video…");
 $("#watch-btn").onclick = (e) => busy(e.target, () => api("/api/task2/watch", { seconds: 10 }), { out: "#task2-out", text: "Recording 10 s of your screen, then looking at it…" });
 const lookNow = (e) => busy(e.target, () => api("/api/task2", {}), { out: "#task2-out", text: "Looking at your screen…" })
-  .then((done) => { if (done && !isTab("tasks")) toast("Done. The answer is in the Tasks tab (press 6)."); });
+  .then((done) => { if (done && !isTab("tasks")) toast("Done. The answer is in the Tasks tab (press 8)."); });
 $("#look-btn").onclick = lookNow;
 $("#look-btn2").onclick = lookNow;
 
@@ -737,15 +740,22 @@ function renderTask2(e) {
 }
 
 // --- Memory -------------------------------------------------------------------
-const KIND_NAMES = { voice_note: "Voice note", action_item: "Action item", screen_help: "Screen", screen_video: "Screen video", note: "Note" };
+const KIND_NAMES = { voice_note: "Voice note", action_item: "Action item", screen_help: "Screen", screen_video: "Screen video", note: "Note",
+  transcript: "Heard", summary: "Summary", fact: "Fact" };
 const kindTag = (k) => `<span class="tag plain">${esc(KIND_NAMES[k] || k)}</span>`;
 const isImage = (p) => /\.(png|jpe?g|webp)$/i.test(p || "");
-const memRow = (m, extra = "") => `<div class="mem"><div><div class="mem-text">${esc(m.text)}</div>
-  <div class="mem-meta">${kindTag(m.kind)}${m.when ? `<span>${esc(m.when)}</span>` : ""}${extra}</div></div>
+const ids = (list) => list.map((i) => "#" + i).join(", ");
+const lineage = (m) => [
+  m.meta?.sources?.length ? `cites ${ids(m.meta.sources)}` : "",
+  m.covered_by > 0 ? `summarized in #${m.covered_by}` : m.covered_by === 0 ? "looked at, nothing to summarize" : "",
+  m.superseded_by ? `replaced by #${m.superseded_by}` : "",
+].filter(Boolean).map((t) => `<span>${esc(t)}</span>`).join("");
+const memRow = (m, extra = "") => `<div class="mem${m.superseded_by ? " muted" : ""}"><div><div class="mem-text"><span class="muted">#${m.id}</span> ${esc(m.text)}</div>
+  <div class="mem-meta">${kindTag(m.kind)}${m.when ? `<span>${esc(m.when)}</span>` : ""}${lineage(m)}${extra}</div></div>
   ${isImage(m.media) ? zoomable(m.media, "Screen saved with this memory") : ""}</div>`;
 async function refreshMemory() {
   let rows;
-  try { rows = await api("/api/memory"); } catch (e) { toast(e.message, "error"); return; }
+  try { rows = await api("/api/memory?level=" + encodeURIComponent($("#mem-level").value)); } catch (e) { toast(e.message, "error"); return; }
   $("#mem-count").textContent = rows.length ? `(${num(rows.length)})` : "";
   $("#mem-clear").hidden = !rows.length;
   $("#mem-all").innerHTML = rows.map((m) => memRow(m)).join("")
@@ -759,7 +769,7 @@ $("#mem-form").onsubmit = async (e) => {
   e.preventDefault();
   const q = $("#mem-q").value.trim();
   if (!q) return;
-  const hits = await busy(e.submitter ?? $("#mem-form button"), () => api("/api/memory/search", { q }));
+  const hits = await busy(e.submitter ?? $("#mem-form button"), () => api("/api/memory/search", { q, mode: $("#mem-mode").value }));
   if (!hits) return;
   const score = (h) => `<span class="score-meter" title="Similarity: higher means closer in meaning"><i style="--pct:${Math.max(0, h.score) * 100}%"></i>${h.score.toFixed(2)} similar</span>`;
   $("#mem-hits").innerHTML = `<div class="hint" style="margin-top:8px">Best ${plural(hits.length, "match", "matches")} for "${esc(q)}"</div>` +

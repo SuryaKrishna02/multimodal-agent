@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from agent import config
-from evals.synthetic import audio, screens, structured, text
+from evals.synthetic import audio, day, screens, structured, text
 
 BUILDERS: dict[str, Callable[[Path], None]] = {
     "tools": text.build_tools,
@@ -28,6 +28,11 @@ BUILDERS: dict[str, Callable[[Path], None]] = {
     "task2": screens.build_task2,
     "screen": screens.build_screen,
     "structured": structured.build_structured,
+    # Session 2
+    "multimodal": day.build_multimodal,
+    "consolidation": day.build_consolidation,
+    "task3": day.build_task3,
+    "task4": day.build_task4,
 }
 MARKER = ".version"
 

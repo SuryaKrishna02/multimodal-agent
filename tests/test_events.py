@@ -24,7 +24,7 @@ class EventIdTest(unittest.TestCase):
 
     def test_memory_stored_does_not_pass_an_id_field(self):
         """`memory.stored` names its row id `memory_id`, so the value stays in the event."""
-        calls = re.findall(r'events\.emit\("memory\.stored",[^\n]*', EPISODIC.read_text())
+        calls = re.findall(r'events\.emit\(\s*"memory\.stored",[^)]*\)', EPISODIC.read_text())  # the call can wrap
         self.assertEqual(len(calls), 1)
         self.assertIn("memory_id=", calls[0])
         self.assertNotRegex(calls[0], r"\bid=")

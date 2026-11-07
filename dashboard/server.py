@@ -17,9 +17,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from agent import brain, config, events, hotkey, serving, tasks, tools
+from agent import brain, config, daemon, events, hotkey, serving, tasks, tools
 from agent.memory import episodic
 from agent.senses import audio, screen, video
+from dashboard import always_on
 from evals import common as evals_common
 
 state = {"tier": config.TIER, "history": [], "mic": None}
@@ -43,8 +44,12 @@ async def lifespan(_app):
         except Exception as e:  # noqa: BLE001 - show the failure in the event log
             events.emit("serving.error", message=str(e))
         # After the first start, so the watchers cannot race it. One each, because a restart waits for the model to load.
-        threading.Thread(target=serving.watch, args=(lambda: emb,), daemon=True).start()
-        serving.watch(lambda: llm)
+        # While the daemon runs, it watches the servers, so two processes never restart the same one.
+        no_daemon = lambda: not daemon.status()["alive"]  # noqa: E731
+        threading.Thread(target=serving.watch, args=(lambda: emb, no_daemon), daemon=True).start()
+        serving.watch(lambda: llm, no_daemon)
+
+    events.set_source("dashboard")
 
     threading.Thread(target=boot, daemon=True).start()
     try:
@@ -55,6 +60,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(always_on.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -103,7 +109,7 @@ def get_state():
         "embed_port": config.EMBED_PORT,
         "llm_rss_gb": round(llm.rss_gb(), 2),
         "embed_rss_gb": round(emb.rss_gb(), 2),
-        "mic_paused": audio.Mic.paused,
+        "mic_paused": audio.paused(),
         "recording": state["mic"] is not None,
         "pending": [{"call_id": i, "tool": n, "args": a} for i, (n, a) in tools.PENDING.items()],
     }
@@ -212,8 +218,7 @@ def mic_pause(body: dict):
     Returns:
         dict: The new state.
     """
-    audio.Mic.paused = bool(body["paused"])
-    events.emit("senses.mic", state="paused" if audio.Mic.paused else "unpaused")
+    audio.set_paused(bool(body["paused"]))
     return get_state()
 
 
@@ -227,7 +232,7 @@ def mic_start():
     Raises:
         HTTPException: 409 if the microphone is paused.
     """
-    if audio.Mic.paused:
+    if audio.paused():
         raise HTTPException(409, "Microphone is paused")
     state["mic"] = audio.Mic()
     state["mic"].start()
@@ -337,13 +342,16 @@ def media(path: str):
 
 
 @app.get("/api/memory")
-def memory_list():
+def memory_list(level: str = ""):
     """List the newest memories.
+
+    Args:
+        level (str, optional): Only this level: "raw", "summary" or "fact". Defaults to all.
 
     Returns:
         list[dict]: Up to 200 memories.
     """
-    return episodic.all_memories()
+    return episodic.all_memories(levels=(level,) if level else None)
 
 
 @app.post("/api/memory/search")
@@ -351,12 +359,12 @@ def memory_search(body: dict):
     """Search memories.
 
     Args:
-        body (dict): JSON with `q`, the query text.
+        body (dict): JSON with `q`, the query text, and optional `mode`: "both" (default), "text" or "media".
 
     Returns:
         list[dict]: The 5 best matches.
     """
-    return episodic.search(body["q"], k=5)
+    return episodic.search(body["q"], k=5, mode=body.get("mode", "both"))
 
 
 @app.post("/api/memory/clear")

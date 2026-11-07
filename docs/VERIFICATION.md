@@ -250,6 +250,135 @@ Restart, with throwaway servers on other ports and the dashboard's own startup c
 - Not covered: a server that hangs while its process stays. That process may be loading or busy with a long input, so
   the watcher leaves it alone. The cause of the stop on 2026-10-31 at about 09:58 is still unknown.
 
+## Session 2: always on and learning (2026-11-06)
+
+Build b11960, Gemma 4 E4B, on the M4 Mac. Every number comes from the synthetic cases (OS voices and drawn screens).
+They are a regression check, not a measure of real use.
+
+### Pins added
+
+| Item | Pin | How |
+|---|---|---|
+| Whisper large-v3-turbo, MLX format | `mlx-community/whisper-large-v3-turbo` @ `a4aaeec` (`config.json`, `weights.safetensors`, 1.61 GB) | downloaded and hashed; the sha256 values are in `agent/accel/metal.py` |
+| `mlx-whisper` | 0.4.3 (2025-08-29, the newest on PyPI) | installed with `--no-deps` from `requirements/nodeps-macos.txt` |
+| Runtime dependencies of `mlx-whisper` | `mlx` 0.32.4, `numba` 0.68.1, `scipy` 1.18.1, `tiktoken` 0.14.0, `huggingface_hub` 2.4.0 and their dependencies | resolved by pip on 2026-11-06, in `requirements/lock-macos.txt` |
+
+`mlx-whisper` declares `torch` (a 138 MB wheel). In the 0.4.3 wheel, only `torch_whisper.py`, the weight converter,
+imports it. `transcribe()` imports `mlx`, `numba`, `scipy` and `tiktoken`. So setup installs the package without its
+declared dependencies, and the lock file pins the ones that `transcribe()` needs.
+
+### Thinking leaked into a JSON reply, and how we stopped it
+
+With `enable_thinking: false` and a JSON schema, E4B wrote a 3,137-character plan into `reasoning_content` on a
+consolidation request. The plan used up all 1,024 output tokens, and the JSON content stopped after 356 characters.
+Two runs gave the same result. Session 1 did not see this, because its JSON requests were shorter.
+
+| Request field | finish_reason | completion tokens | reasoning | valid JSON |
+|---|---|---|---|---|
+| none | length | 1,024 | 3,137 chars | no (2 of 2 runs) |
+| `reasoning_budget: 0` | length | 1,024 | 3,137 chars | no (2 of 2): the server ignores this field |
+| `thinking_budget_tokens: 0` (used) | stop | 672 | none | yes (2 of 2) |
+
+`brain.ask_json()` now sends `thinking_budget_tokens: 0` when `config.THINKING` is off. We did not use the server flag
+`--reasoning-budget 0`: it turns off thinking for every request, and `brain.respond()` needs thinking after a tool
+result. So the field goes on each JSON request only.
+
+### Whisper and the streaming segmenter
+
+The 57.4 s synthetic conversation has 11 spoken lines from 3 voices. The `Segmenter` cut it into exactly 11 utterances.
+It got the audio in 1 s steps, as from the live microphone. Whisper took about 0.9 s per utterance. The first one took
+3.9 s, because it also loads the model. Whisper made these errors:
+
+- "standoff" for "standup", and "F site" for "offsite"
+- "Kriya" for "Priya": Task 3 then answered "Kriya will send the deposit", and that question failed
+
+The asr eval on the same 10 clips:
+
+| Engine | WER | Seconds per clip |
+|---|---|---|
+| Gemma 4 E4B | 4.4% | 0.97 |
+| Whisper large-v3-turbo | 2.6% | 1.20 (includes the model load on the first clip) |
+
+Gemma dropped the last words of two clips ("a quarter to", "a lot of"). Both engines heard "oat milk" wrong.
+
+### Consolidation
+
+| Run | Faithfulness | Invalid citations | Compression | Recall before / after forgetting |
+|---|---|---|---|---|
+| First prompt | 0.97 | 19% | 0.51 | 1.00 / 1.00 |
+| Merged claims, known facts as `[F12]` (used) | 1.00 | 0% | 1.31 (target 1.5: FAIL) | 1.00 / 0.93 |
+
+With the first prompt, the model wrote one claim per raw row, plus a fact for each. The kept text was then twice as long
+as the raw text. It also cited the ids of the known facts as sources, and the code dropped them. The prompt now asks
+for at most one claim per three rows, and it labels known facts `[F<id>]`.
+
+Compression now counts the summaries only, because facts are an index next to the summary. The synthetic logs have
+about one fact per row, so they leave little to compress. The threshold stays at 1.5.
+
+### Multimodal memory
+
+Recall at 3 is 1.0 in every mode, because 8 images and 10 clips are easy. At 1, the media vectors did better:
+
+| Modality | First result, text vectors | First result, media vectors | First result, both |
+|---|---|---|---|
+| Screenshots (8) | 0.875 | 1.00 | 1.00 |
+| Speech clips (10) | 0.90 | 1.00 | 1.00 |
+
+The text of a screenshot is Task 2's description, and the text of a clip is its Whisper transcript. A drawn terminal
+is easier than a real screen.
+
+### Crash recovery
+
+- The `daemon` eval kills a daemon twice with SIGKILL, in a sleep job. It measured 0.11 s from the restart to the
+  next step. No finished step ran again, and no job was lost. The step that ran during the kill ran again, as designed.
+- With real models, a daemon replayed the conversation at real time on a throwaway runtime folder. We killed it with
+  SIGKILL after 4 of 11 utterances had a result. The new daemon logged `checkpoint.recovered` and skipped utterances 0
+  to 3 without transcribing them again. It finished the other 7, and the feed showed the job as done.
+- `caffeinate -i -w <pid>` ended by itself when the daemon was killed.
+- `daemon stop` (SIGTERM) let the daemon log `daemon.stopped` and exit.
+
+### Soak and the dashboard endpoints
+
+- `scripts/soak.py --hours 0.1 --every 120` ran for 8 minutes as a check of the script, not as the soak itself. It
+  queued 3 replays, and all 3 finished. It found 0 missed slots and 0 late heartbeats. The daemon process peaked at
+  520 MB of resident memory after it loaded Whisper. The run was too short for a memory growth figure. We did not check
+  whether resident memory includes the Metal buffers that MLX allocates for Whisper.
+- With real models and a throwaway runtime folder, a script called each Session 2 endpoint. It called replay,
+  consolidate, ask, brief, feedback, reflect, diff, rollback, and a job kind that the page must refuse. Each returned
+  what the code says. The Task 3 answer cited the summary row, not a raw transcript. Reflect wrote v2, rollback made v1
+  active again, and the locked blocks stayed untouched.
+
+### Self-evolution (Task 4)
+
+First run. Held-out compliance went from 0.50 to 0.96, with no regressions and 0 locked edits. But the overfitting
+example learned the opposite rule: "Do not start the headline with the word Dentist". The reflection prompt showed
+feedback as `- (bad) Start the headline with the word Dentist.`, and the model read that as "this was bad, do not do
+it". The prompt now says `The user rated a brief bad and said: "..."`.
+
+Second run, with that fix:
+
+| | Dev days | Held-out days |
+|---|---|---|
+| Seed prompt | 0.50 | 0.50 |
+| After 3 rounds of simulated feedback | 0.96 | 1.00 |
+
+No held-out check regressed, and no version changed a locked block.
+
+The overfitting example then gave three rounds of
+feedback that is true for one day only. Afterwards, that day followed the rule. All 4 held-out days, which have no
+dentist, mentioned Dr. Lee, and held-out compliance dropped by 0.08. One held-out brief started with "Dr. Lee was
+mentioned in the context of today's activities". That sentence breaks the locked rule "Never invent an event". A
+learned preference cannot change the locked text, but it can still win over a locked instruction in the model.
+
+### Found while testing
+
+- **Two requests upgraded one database at once.** The dashboard opened a Session 1 memory database from two requests,
+  and both added the new columns: "duplicate column name: level". `agent/sql.py` now creates tables under a lock, and
+  the upgrade accepts a column that another process added a moment before.
+- **`screencapture -v` waited forever** when `doctor --exercise` ran from the shell of the Claude app. It did not fail.
+  That shell probably lacks Screen Recording permission. This is the Session 1 `record_screen` hook, and Session 2 did
+  not change it.
+
 ## Not verified yet
 
 - Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool
@@ -258,3 +387,9 @@ Restart, with throwaway servers on other ports and the dashboard's own startup c
 - Mic recording and the global hotkey need permissions that only you can grant. Please try
   `cli.py note` and the hotkey once you grant the permissions.
 - Memory use with a Google Meet call running alongside.
+- Session 2, live microphone: the always-on `Listener` with a real microphone. Only replays of recordings were tested.
+- Session 2, `daemon install` (launchd): the plist and the commands are written but were not run, because they change
+  your login items. It is also unknown whether a process that launchd starts gets the Microphone permission.
+- Session 2, notifications: `osascript` exited with code 0, but nobody looked at the screen to see the notification.
+- Session 2, a soak of several hours: only an 8-minute check of `scripts/soak.py` ran (see "Soak and the dashboard endpoints").
+- Session 2 evals on E2B: every Session 2 number above is E4B.

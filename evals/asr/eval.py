@@ -1,4 +1,4 @@
-"""Speech recognition eval: word error rate of Gemma 4 audio on your own clips.
+"""Speech recognition eval: word error rate of Gemma 4 audio and of Whisper, on the same clips.
 
 Cases: data/evals/{synthetic,user}/asr/
     clip01.wav   one utterance, under 30 s
@@ -6,20 +6,25 @@ Cases: data/evals/{synthetic,user}/asr/
 
 Metric: WER = (substitutions + deletions + insertions) / reference words,
 after lowercasing, removing punctuation and removing fillers (um, uh, ...) on both sides.
+
+Session 2 adds Whisper (the accelerator's `transcribe` hook) for always-on listening:
+    wer / gemma_s           Gemma 4 through llama-server, and its seconds per clip
+    whisper_wer / whisper_s Whisper large-v3-turbo, and its seconds per clip
+If the accelerator has no transcribe hook, the Whisper metrics are left out.
 """
 
 import re
+import time
 from pathlib import Path
 
 import jiwer
 
-from agent import brain
-from agent.senses import audio
+from agent.platforms.base import Unsupported
+from agent.senses import audio, stt
 from evals.common import NoCases
 
 LEVEL, USES_LLM = "component", True
 FILLERS = {"um", "uh", "erm", "er", "hmm", "mm"}
-PROMPT = "Transcribe this audio exactly. Output only the transcript."
 
 
 def normalize(text: str) -> str:
@@ -67,18 +72,31 @@ def run_item(item):
         dict: A record with `reference`, `hypothesis`, `errors` and `ref_words`.
     """
     samples = audio.load_wav(item["wav"])
-    msgs = [{"role": "user", "content": [brain.part("audio", samples), brain.part("text", PROMPT)]}]
-    hyp = brain.send(msgs)["choices"][0]["message"].get("content") or ""
-    ref_n, hyp_n = normalize(item["reference"]), normalize(hyp)
-    out = jiwer.process_words(ref_n, hyp_n)
-    return {
-        "file": item["wav"].name,
-        "audio": str(item["wav"]),
-        "reference": item["reference"],
-        "hypothesis": hyp,
-        "errors": out.substitutions + out.deletions + out.insertions,
-        "ref_words": len(ref_n.split()),
-    }
+    rec = {"file": item["wav"].name, "audio": str(item["wav"]), "reference": item["reference"]}
+    for engine, prefix in (("gemma", ""), ("whisper", "whisper_")):
+        t0 = time.time()
+        try:
+            hyp = stt.transcribe(samples, engine)
+        except Unsupported:
+            continue  # this accelerator has no Whisper: report Gemma only
+        rec |= {f"{prefix}hypothesis": hyp, f"{prefix}errors": errors(item["reference"], hyp)}
+        rec[f"{engine}_s"] = round(time.time() - t0, 2)
+    rec["ref_words"] = len(normalize(item["reference"]).split())
+    return rec
+
+
+def errors(reference: str, hypothesis: str) -> int:
+    """Count word errors after normalizing both sides.
+
+    Args:
+        reference (str): What was said.
+        hypothesis (str): What the engine heard.
+
+    Returns:
+        int: Substitutions + deletions + insertions.
+    """
+    out = jiwer.process_words(normalize(reference), normalize(hypothesis))
+    return out.substitutions + out.deletions + out.insertions
 
 
 def score(records):
@@ -90,4 +108,10 @@ def score(records):
     Returns:
         dict: Metric name to value.
     """
-    return {"wer": round(sum(r["errors"] for r in records) / max(sum(r["ref_words"] for r in records), 1), 3)}
+    words = max(sum(r["ref_words"] for r in records), 1)
+    out = {"wer": round(sum(r["errors"] for r in records) / words, 3)}
+    out["gemma_s"] = round(sum(r.get("gemma_s", 0) for r in records) / max(len(records), 1), 2)
+    if all("whisper_errors" in r for r in records):
+        out["whisper_wer"] = round(sum(r["whisper_errors"] for r in records) / words, 3)
+        out["whisper_s"] = round(sum(r["whisper_s"] for r in records) / max(len(records), 1), 2)
+    return out
