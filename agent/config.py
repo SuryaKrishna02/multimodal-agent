@@ -114,6 +114,10 @@ WORKSPACE = Path(os.environ.get("AGENT_WORKSPACE", ROOT / "data" / "workspace"))
 
 # --- Interfaces --------------------------------------------------------------
 DASHBOARD_PORT = 8765
+CHAT_FILE = RUNTIME / "chat.json"  # the dashboard chat, kept over a restart; Clear chat empties it
+CHAT_HISTORY_MESSAGES = 6  # earlier chat messages sent with each request (the budget may drop more)
+CHAT_KEEP = 200  # messages kept in CHAT_FILE; older ones are dropped
+CHAT_IMAGE_MAX_BYTES = 20_000_000  # a picture pasted or dropped into the chat
 HOTKEY = "<ctrl>+<alt>+<space>"  # pynput syntax; "look at my screen and help"
 
 # --- Eval pass thresholds (scorecard) ----------------------------------------

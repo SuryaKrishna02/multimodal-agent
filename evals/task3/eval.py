@@ -14,6 +14,13 @@ unanswerable question is correct when the answer says it does not know and cites
 
 Metrics: accuracy (all questions), abstain_rate (unanswerable questions answered "I do not know"),
 cited_rate (answered questions that cite at least one memory).
+
+Where a wrong answer went wrong. An end-to-end score alone does not say which stage to fix, so each
+wrong answer gets the first stage that lost the information (`failed_at`), checked by code:
+    hearing    the transcripts do not contain the answer (an ASR or segmentation error)
+    retrieval  the transcripts have it, but the memories the model read do not (search or consolidation)
+    answer     the model read it and still answered wrong, or invented an answer to an unanswerable question
+lost_hearing, lost_retrieval and lost_answer count the wrong answers per stage.
 """
 
 import json
@@ -29,8 +36,12 @@ from evals.common import NoCases
 
 LEVEL, USES_LLM = "end-to-end", True
 NEEDS_EMBED_SERVER = True
+# Ways a small model says "I do not know". E2B wrote "The memories do not contain any information about ...".
+# An abstention must also cite no memory, so a hedge next to an invented answer still fails.
 DONT_KNOW = re.compile(
-    r"\b(do not know|don't know|not sure|no information|not mentioned|no record|cannot find)\b", re.I
+    r"\b(do not know|don't know|not sure|cannot find|can't find|no record|not mentioned|never mentioned"
+    r"|(no|any) (information|mention|record)|(do|does|did)(n't| not) (contain|include|mention|say))\b",
+    re.I,
 )
 _heard: dict[str, list[str]] = {}  # recording -> transcripts, so each recording is replayed once per run
 
@@ -47,6 +58,7 @@ def load_cases(cases_dir: Path):
     Raises:
         NoCases: If no recording has a .json file beside it.
     """
+    _heard.clear()  # a new run (or a rebuilt recording) replays from an empty database
     items = []
     for wav in sorted(cases_dir.glob("*.wav")):
         if not wav.with_suffix(".json").exists():
@@ -79,6 +91,41 @@ def hear_recording(wav: str, start: str) -> list[str]:
     return heard
 
 
+def mentions(text: str, groups: list[list[str]]) -> bool:
+    """Check that a text has at least one phrase of every group, in any case.
+
+    Args:
+        text (str): The text.
+        groups (list[list[str]]): The must_mention groups.
+
+    Returns:
+        bool: True if every group has a phrase in the text.
+    """
+    low = text.lower()
+    return all(any(p.lower() in low for p in group) for group in groups)
+
+
+def failed_at(item: dict, ok: bool, heard: list[str], read: list[str]) -> str | None:
+    """Name the first stage that lost the answer, or None for a correct answer.
+
+    Args:
+        item (dict): The question with `must_mention` and `unanswerable`.
+        ok (bool): Whether the answer is correct.
+        heard (list[str]): The transcripts of the recording.
+        read (list[str]): The texts of the memories the model read.
+
+    Returns:
+        str | None: "hearing", "retrieval", "answer", or None.
+    """
+    if ok:
+        return None
+    if item["unanswerable"]:
+        return "answer"
+    if not mentions(" ".join(heard), item["must_mention"]):
+        return "hearing"
+    return "retrieval" if not mentions(" ".join(read), item["must_mention"]) else "answer"
+
+
 def correct(item: dict, answer: str, cited: list[int]) -> bool:
     """Check one answer.
 
@@ -92,8 +139,7 @@ def correct(item: dict, answer: str, cited: list[int]) -> bool:
     """
     if item["unanswerable"]:
         return bool(DONT_KNOW.search(answer)) and not cited
-    low = answer.lower()
-    return all(any(p.lower() in low for p in group) for group in item["must_mention"])
+    return mentions(answer, item["must_mention"])
 
 
 def run_item(item):
@@ -111,6 +157,8 @@ def run_item(item):
             _heard.clear()
             _heard[item["wav"]] = hear_recording(item["wav"], item["start"])
         r = tasks.recall(item["question"], now=_today(item["ask_at"]))
+    ok = correct(item, r["answer"], r["memory_ids"])
+    heard = _heard[item["wav"]]
     return {
         "question": item["question"],
         "audio": item["wav"],
@@ -118,8 +166,10 @@ def run_item(item):
         "memory_ids": r["memory_ids"],
         "window": r["window"],
         "unanswerable": item["unanswerable"],
-        "correct": correct(item, r["answer"], r["memory_ids"]),
-        "transcripts": _heard[item["wav"]],
+        "correct": ok,
+        "failed_at": failed_at(item, ok, heard, [m["text"] for m in r["memories"]]),
+        "memories_read": r["memories"],
+        "transcripts": heard,
     }
 
 
@@ -139,4 +189,6 @@ def score(records):
         out["abstain_rate"] = round(sum(r["correct"] for r in unans) / len(unans), 3)
     if ans:
         out["cited_rate"] = round(sum(bool(r["memory_ids"]) for r in ans) / len(ans), 3)
+    for stage in ("hearing", "retrieval", "answer"):
+        out[f"lost_{stage}"] = sum(r.get("failed_at") == stage for r in records)
     return out

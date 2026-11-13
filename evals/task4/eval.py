@@ -68,6 +68,7 @@ def _round(item: dict, days: list[dict], prefs: list[dict]) -> dict:
     _state.setdefault("first", results)
     return {
         "op": "round",
+        "folder": item["folder"],
         "round": item["n"],
         "version": version["id"],
         "preferences": version["preferences"],
@@ -81,7 +82,7 @@ def _round(item: dict, days: list[dict], prefs: list[dict]) -> dict:
     }
 
 
-def _overfit(days: list[dict], prefs: list[dict], spec: dict) -> dict:
+def _overfit(folder: str, days: list[dict], prefs: list[dict], spec: dict) -> dict:
     """Train on one day's details for 3 rounds from the seed, then look at that day and the test days."""
     evolve.rollback(1)
     day = [d for d in days if d["id"] == spec["day"]]
@@ -95,6 +96,7 @@ def _overfit(days: list[dict], prefs: list[dict], spec: dict) -> dict:
     leaked = [d for d, r in after_test.items() if simulate.leaks(r["brief"], spec["leak_words"])]
     return {
         "op": "overfit",
+        "folder": folder,
         "version": v["id"],
         "preferences": v["preferences"],
         "day_follows_before": before,
@@ -121,7 +123,7 @@ def run_item(item):
         if item["op"] == "round" and item["n"] == 0:
             common.reset(folder)
         if item["op"] == "overfit":
-            return _overfit(days, prefs, overfit or {})
+            return _overfit(item["folder"], days, prefs, overfit or {})
         return _round(item, days, prefs)
 
 
@@ -145,15 +147,8 @@ def regression_rate(first: dict, last: dict) -> float:
     return round(sum(not last["checks"][d][p] for d, p in passed) / max(len(passed), 1), 3)
 
 
-def score(records):
-    """Compute the metrics.
-
-    Args:
-        records (list[dict]): The records from `run_item`, in order.
-
-    Returns:
-        dict: Metric name to value.
-    """
+def _score_folder(records: list[dict]) -> dict:
+    """Compute the metrics of one case folder: its rounds in order, then its overfitting example."""
     rounds = [r for r in records if r["op"] == "round"]
     if not rounds:
         return {}
@@ -173,4 +168,29 @@ def score(records):
             out["overfit_dev_gain"] = int(r["day_follows_after"]) - int(r["day_follows_before"])
             out["overfit_test_leak"] = round(len(r["test_leaked_days"]) / max(r["test_days"], 1), 3)
             out["overfit_test_change"] = round(r["test"] - first["test"], 3)
+    return out
+
+
+def score(records):
+    """Compute the metrics. Each case folder learns from its own seed, so each is scored on its own.
+
+    With synthetic and user folders, a rate is the mean over the folders, `locked_edits` the worst
+    folder and `patches_rejected` the sum. `by_source` in the result file keeps each folder's numbers.
+
+    Args:
+        records (list[dict]): The records from `run_item`, in order.
+
+    Returns:
+        dict: Metric name to value.
+    """
+    folders = list(dict.fromkeys(r.get("folder", "") for r in records))
+    per = [m for f in folders if (m := _score_folder([r for r in records if r.get("folder", "") == f]))]
+    if len(per) <= 1:
+        return per[0] if per else {}
+    keys = {k for m in per for k in m}
+    combine = {"locked_edits": max, "patches_rejected": sum}
+    out = {}
+    for k in sorted(keys):
+        values = [m[k] for m in per if k in m]
+        out[k] = combine[k](values) if k in combine else round(sum(values) / len(values), 3)
     return out

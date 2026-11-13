@@ -10,8 +10,15 @@ or let this script start them). Every `--every` seconds it queues a replay of th
 memory of the daemon and the servers.
 
 Missed events = queued jobs that never finished + schedule slots the daemon reported as missed
-+ heartbeats that came more than 3 beats late. Memory growth is a straight-line fit of the daemon's
-resident memory after the first 5 minutes (loading the models and Whisper is not growth).
++ heartbeats that came more than 3 beats late + samples where the daemon was not running at all.
+Memory growth is a straight-line fit of the daemon's resident memory after the first 5 minutes
+(loading the models and Whisper is not growth), so a soak shorter than about 10 minutes has no growth
+number. A leak of a few MB per hour only shows over hours: 3 hours is the run the eval expects.
+
+A sleeping machine runs nothing. Two samples more than SLEEP_GAP_S apart mean the machine slept in between
+(keep-awake stops idle sleep, not a closed lid). Schedule slots that fell in such a gap are counted as
+`missed_while_asleep`, not as missed events, and `awake_hours` leaves the gaps out. Keep the lid open and the
+power connected for a soak.
 Results: evals/results/soak/<time>.json
 """
 
@@ -34,6 +41,7 @@ from agent import checkpoint, config, daemon, events, platforms, serving  # noqa
 from evals import synthetic  # noqa: E402
 
 WARMUP_S = 300  # model and Whisper loading is not growth
+SLEEP_GAP_S = 180  # samples come every 60 s; a longer gap means the machine was asleep
 
 
 def rss_mb(pid: int | None) -> float | None:
@@ -68,19 +76,39 @@ def growth_mb_per_h(samples: list[dict]) -> float | None:
     return round(float(np.polyfit(t / 3600, mb, 1)[0]), 2)
 
 
-def summarize(samples: list[dict], submitted: list[int], t0: float) -> dict:
-    """Count missed events and compute the growth."""
+def sleep_gaps(samples: list[dict], end_s: float) -> list[tuple[float, float]]:
+    """Find the stretches (seconds after the start) when the machine slept: no sample for SLEEP_GAP_S or more."""
+    times = [s["t_s"] for s in samples] + [end_s]
+    return [(a, b) for a, b in zip(times, times[1:], strict=False) if b - a > SLEEP_GAP_S]
+
+
+def missed_slots_split(t0: float, gaps: list[tuple[float, float]]) -> tuple[list[dict], list[dict]]:
+    """Split the schedule slots that the daemon reported as missed into (while awake, while asleep)."""
+    slots = [e for e in events.since(0, "daemon.missed") if e["ts"] >= t0]
+    asleep = [e for e in slots if any(a <= e["slot"] - t0 <= b for a, b in gaps)]
+    return [e for e in slots if e not in asleep], asleep
+
+
+def summarize(samples: list[dict], submitted: list[int], t0: float, end: float | None = None) -> dict:
+    """Count missed events and compute the growth. Slots that passed while the machine slept are counted apart."""
+    end = end or time.time()
     jobs = {j["id"]: j for j in checkpoint.jobs(10_000)}
     unfinished = [i for i in submitted if jobs.get(i, {}).get("status") != "done"]
-    missed_slots = [e for e in events.since(0, "daemon.missed") if e["ts"] >= t0]
+    gaps = sleep_gaps(samples, end - t0)
+    missed_slots, asleep = missed_slots_split(t0, gaps)
     late_beats = [s for s in samples if s["alive"] and s["heartbeat_age_s"] > 3 * config.DAEMON_HEARTBEAT_S]
+    down = [s for s in samples if not s["alive"]]
     return {
-        "soak_hours": round((time.time() - t0) / 3600, 2),
+        "soak_hours": round((end - t0) / 3600, 2),
+        "awake_hours": round((end - t0 - sum(b - a for a, b in gaps)) / 3600, 2),
+        "asleep_gaps": len(gaps),
+        "missed_while_asleep": len(asleep),
         "rss_growth_mb_per_h": growth_mb_per_h(samples),
-        "missed_events": len(unfinished) + len(missed_slots) + len(late_beats),
+        "missed_events": len(unfinished) + len(missed_slots) + len(late_beats) + len(down),
         "unfinished_jobs": unfinished,
         "missed_slots": len(missed_slots),
         "late_heartbeats": len(late_beats),
+        "down_samples": len(down),
         "jobs_submitted": len(submitted),
         "jobs_failed": sum(1 for j in jobs.values() if j["status"] == "failed"),
         "peak_daemon_mb": max((s["daemon_mb"] or 0) for s in samples),
@@ -122,7 +150,8 @@ def main() -> None:
             time.sleep(60)
         time.sleep(min(300, a.every))  # let the last job finish
     finally:
-        psutil.Process(pid).terminate()
+        if psutil.pid_exists(pid):  # a daemon that died is the finding: still write the result
+            psutil.Process(pid).terminate()
     out = config.RESULTS / "soak" / f"{RUN}.json"
     out.write_text(json.dumps({"summary": summarize(samples, submitted, t0), "samples": samples}, indent=1))
     print(json.dumps(json.loads(out.read_text())["summary"], indent=1))

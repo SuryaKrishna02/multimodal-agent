@@ -209,13 +209,14 @@ def ask_json(user: list[dict], schema: dict, system: str | None = None, retries:
 # --- 4. Tool calls -------------------------------------------------------------
 
 
-def _recall(query: str, use_memory: bool) -> list[str]:
-    """Format the memories that match `query`, or return none when memory is off."""
+def _recall(query: str, use_memory: bool) -> list[dict]:
+    """Find the memories that match `query`, or none when memory is off."""
     if not (use_memory and query):
         return []
     from agent.memory import episodic
 
-    return [f"({m['when']}, {m['kind']}) {m['text']}" for m in episodic.search(query)]
+    keys = ("id", "when", "kind", "level", "text", "score")
+    return [{k: m[k] for k in keys} for m in episodic.search(query)]
 
 
 def _waiting_calls() -> str:
@@ -294,13 +295,26 @@ def approval_note(outcome: dict) -> dict:
 
 
 def respond(user: list[dict], history: list[dict] | None = None, use_memory: bool = True, max_steps: int = 4) -> dict:
-    """A full turn: memories + tools. Returns {"text", "tool_calls", "tokens"}."""
+    """A full turn: memories + tools.
+
+    Args:
+        user (list[dict]): The parts of the user message, from `part()`.
+        history (list[dict], optional): Earlier messages with `role` and `content`. Defaults to none.
+        use_memory (bool, optional): Put the memories that match the text into the system prompt. Defaults to True.
+        max_steps (int, optional): Model requests before the turn stops. Defaults to 4.
+
+    Returns:
+        dict: `text`, `tool_calls`, `tokens` (the context budget), `tools_offered` and `memories` (the recalled
+            memories, with `id`, `when`, `kind`, `level`, `text` and `score`).
+    """
     query = " ".join(p["text"] for p in user if p["type"] == "text")
     names = tools.select(query or "help", config.MAX_TOOLS_PER_REQUEST)
     system = system_prompt() + _waiting_calls()
-    msgs, used = fit_budget(system, _recall(query, use_memory), history or [], user, tools.schemas(names))
+    hits = _recall(query, use_memory)
+    lines = [f"({m['when']}, {m['kind']}) {m['text']}" for m in hits]
+    msgs, used = fit_budget(system, lines, history or [], user, tools.schemas(names))
     trace, retries_left = [], config.TOOL_RETRIES
-    out = {"tool_calls": trace, "tokens": used, "tools_offered": names}
+    out = {"tool_calls": trace, "tokens": used, "tools_offered": names, "memories": hits}
     for step in range(max_steps):
         # Known Gemma 4 quirk: with thinking off, the turn after a tool result comes back empty
         # (same as ollama/ollama#19044). Thinking on for that one step fixes it.

@@ -237,21 +237,36 @@
   </section>
 
   <aside id="chat" aria-label="Chat">
-    <div class="chat-head"><h2>Chat</h2><button id="chat-clear" class="small" disabled title="Forget this conversation. Long-term memories stay." data-busy="Clearing…">Clear chat</button></div>
+    <div class="chat-head"><h2>Chat</h2>
+      <span class="chat-head-note muted" title="Saved on this machine in data/runtime/chat.json">Kept on this device</span>
+      <button id="chat-clear" class="small" disabled title="Forget this conversation and its pictures. Long-term memories stay." data-busy="Clearing…">Clear chat</button></div>
     <div id="chat-empty">
-      <p>Ask anything. The agent can use tools and remember things. Try one of these:</p>
+      <p>Ask anything. Type, speak, paste a picture or share your screen. The agent recalls your memories and can use tools.</p>
       <div class="suggest">
-        <button type="button" data-suggest="What time is it?">What time is it?</button>
         <button type="button" data-suggest="What do I need to do tomorrow?">What do I need to do tomorrow?</button>
+        <button type="button" data-suggest="What did we decide about the offsite this morning?">What did we decide about the offsite this morning?</button>
+        <button type="button" data-suggest="What is wrong on my screen, and how do I fix it?" data-screen="1">Look at my screen: what is wrong?</button>
         <button type="button" data-suggest="Remember that I have a dentist appointment next Tuesday at 3pm">Remember that I have a dentist appointment…</button>
       </div>
+      <p class="hint">Paste or drop a picture anywhere in this panel. Press <kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line.</p>
     </div>
     <div id="chat-log" aria-live="polite"></div>
     <div id="chat-approvals" role="alert" hidden></div>
     <form id="chat-form">
-      <input id="chat-input" aria-label="Message" placeholder="Ask anything…" autocomplete="off">
-      <label class="with-screen" title="Send one screenshot with this message"><input type="checkbox" id="chat-screen"> Include my screen</label>
-      <button class="primary" data-busy="Sending…">Send</button>
+      <div id="chat-attach" hidden></div>
+      <textarea id="chat-input" rows="1" aria-label="Message" placeholder="Ask anything…" autocomplete="off"></textarea>
+      <div class="composer-bar">
+        <label class="tool-btn" title="Attach a picture (or paste one)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>
+          <span>Picture</span><input type="file" id="chat-file" accept="image/*"></label>
+        <button type="button" id="chat-screen" class="tool-btn" aria-pressed="false" title="Send one screenshot with this message">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+          <span>Screen</span></button>
+        <button type="button" id="chat-voice" class="tool-btn" aria-pressed="false" title="Speak your message. Press again to stop and send.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <span>Voice</span></button>
+        <button class="primary send" data-busy="Sending…">Send</button>
+      </div>
     </form>
   </aside>
 </main>

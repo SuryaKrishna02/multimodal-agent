@@ -53,12 +53,54 @@ Do not change `config.THRESHOLDS` to make a run pass.
 
 | Eval | Level | What it measures | How |
 |---|---|---|---|
-| `asr` (extended) | component | Word error rate of Gemma 4 and of Whisper on the same clips, and seconds per clip | each clip goes through both engines |
+| `asr` (extended) | component | Word error rate of Gemma 4 and of Whisper on the same clips, median seconds per clip and the real-time factor | each clip goes through both engines, after one untimed warm-up call each |
 | `daemon` | component | Recovery time after a kill, finished steps that ran again (must be 0), lost jobs, memory growth and missed events over hours | a real daemon process on a throwaway runtime folder, killed with SIGKILL |
-| `multimodal` | component | Recall of a screenshot or a clip by a text query, with text vectors, media vectors or both | top 3 and top 1 |
+| `multimodal` | component | Recall of a screenshot or a clip by a text query, with text vectors, media vectors or both | top 3 and top 1, next to what random ranking scores |
 | `consolidation` | component | Faithfulness of each claim to the rows it cites, invalid citations, compression, recall before and after forgetting | a separate Gemma request judges each claim |
-| `task3` | end-to-end | Questions about a conversation, hours later: correct answers, "I do not know" when nobody said it, answers that cite memory | the recording goes through the same listener as the microphone |
+| `task3` | end-to-end | Questions about a conversation, hours later: correct answers, "I do not know" when nobody said it, answers that cite memory, and the stage that lost each wrong answer | the recording goes through the same listener as the microphone |
 | `task4` | end-to-end | Preference compliance before and after feedback rounds, on held-out days; regressions; edits to locked blocks; one overfitting example | the simulated user gives feedback on dev days only |
+
+### How to read the Session 2 numbers
+
+A score is only useful when you know what it is compared with, and where a failure comes from. Each Session 2 eval
+reports a few extra numbers for that.
+
+**Speed is real-time factor, not seconds.** `whisper_rtf` and `gemma_rtf` are seconds of work per second of audio. An
+RTF of 0.1 transcribes 10 s of speech in 1 s, so always-on listening keeps up with a large margin. An RTF near 1 falls
+behind as soon as people talk without a pause. The first call of an engine loads its weights (Whisper large-v3-turbo is
+about 1.6 GB), so the eval makes one untimed warm-up call per engine, and `_s` is the median per clip, not the mean.
+
+**Recall against chance.** In `multimodal`, all screenshots and clips share one database, so a query competes with
+every item. `chance_recall` (3 / items) and `chance_top1` (1 / items) are what a random ranking scores. With 18 items,
+chance top-3 is 0.17. A recall of 1.0 is then strong, but the cases are drawn and spoken by the OS, so they are easy
+to tell apart. `items_rejected` counts items that the junk filter refused to store: a query for one of them can never
+succeed, and that is a memory bug, not a search bug.
+
+**Where a wrong answer went wrong.** An end-to-end score says that something failed, not what to fix. `task3` gives
+each wrong answer the first stage that lost the information, checked by code against the case's `must_mention`:
+
+| `failed_at` | The answer is not in... | Fix here |
+|---|---|---|
+| `hearing` | the transcripts | ASR (`stt.py`) or the segmenter (`ambient.py`) |
+| `retrieval` | the memories the model read | search, the time window, or consolidation (`episodic.py`, `consolidate.py`) |
+| `answer` | the reply, though the model read it (or it invented an answer to an unanswerable question) | the recall prompt (`tasks.recall`) |
+
+The scorecard counts them as `lost_hearing`, `lost_retrieval` and `lost_answer`. For example, in one E4B run Whisper
+heard "Priya" as "Kriya". The answer "Kriya will send the deposit" was wrong, and the record says `hearing`: a better
+recall prompt cannot fix that. Open `evals/results/<tier>/task3.json` to read the transcripts and the memories next
+to each answer.
+
+**A short soak proves the script, not the daemon.** Memory growth is a straight-line fit after a 5-minute warm-up, so
+a soak of a few minutes has no growth number and the scorecard shows "not measured". The `daemon` record warns when the
+newest soak is shorter than 1 hour. A leak of a few MB per hour only shows over hours: run `python scripts/soak.py
+--hours 3` before you rely on `rss_growth_mb_per_h`. A soak also counts samples where the daemon was not running at all.
+A sleeping machine runs nothing: the soak counts schedule slots that passed during sleep as `missed_while_asleep`, not
+as missed events, and the scorecard shows `soak_awake_hours` next to the wall-clock `soak_hours`. Keep the lid open and
+the power connected.
+
+**Task 4 compares each case folder with its own seed.** Your days and the synthetic days start from separate seed
+prompts, so `task4` scores each folder on its own. With both, a rate is the mean of the folders, and `by_source` in the
+result file keeps each folder's numbers.
 
 **Held-out days in Task 4.** The simulated user gives feedback only on the 4 dev days. The 4 test days are only
 scored, so `test_gain` is a gain on briefs that the reflection never saw. `regression_rate` counts test checks that
@@ -70,7 +112,12 @@ first bullet".
 
 Then the eval checks two things. Does that day follow the rule (`overfit_dev_gain`)? Do the test days, which have no
 dentist, now mention one (`overfit_test_leak`)? The reflection prompt asks for rules "that hold on every day". The
-result shows whether that instruction is enough.
+result shows whether that instruction is enough. In the E4B runs so far it is not: `overfit_test_leak` was 1.0, so
+every held-out brief mentioned the dentist after the overfit rounds. One test brief said "Dr. Lee was mentioned in
+relation to the offsite agenda", but that day's memories never name Dr. Lee. To obey a learned rule, the model invented
+a fact, even though the locked identity block says "Never invent an event, a name, a time or a task". This is why the
+eval keeps held-out days, and why a prompt that learns from feedback needs a check that code runs, not only an
+instruction.
 
 **The soak test runs beforehand.** `python scripts/soak.py --hours 3` runs its own daemon on a throwaway runtime folder
 and queues a replay of the synthetic conversation every 5 minutes. The `daemon` eval reads the newest file in

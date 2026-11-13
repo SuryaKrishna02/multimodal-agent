@@ -73,6 +73,22 @@ Press the number keys to switch tabs. The page is light only. The chat sits on t
 the tabs more room. A bar at the bottom opens the Activity log (the event log). A dot on a tab lights up while that part
 of the agent is working.
 
+The chat takes text, a picture, your screen or your voice:
+
+- **Picture**: pick a file, paste one (Cmd+V / Ctrl+V), or drop one on the chat panel. It goes to Gemma 4 as an image.
+- **Screen**: one screenshot goes with the next message, then the switch turns itself off.
+- **Voice**: press Voice, speak, press it again. The dashboard records with the same microphone code as Task 1, keeps
+  only the speech (Silero VAD) and turns it into text with `config.STT_ENGINE` (Whisper; Gemma when your accelerator has
+  no Whisper). The text is sent as your message, and the bubble says which engine heard it. The Mic switch at the top
+  still wins.
+
+Under each reply, "Recalled N memories" opens the memories that search put into the prompt, with their match scores.
+"Inspect in Brain" opens that turn in the Brain tab: the context budget, the exact request and the reply. A daily
+brief (from the daemon at 18:00, or from the Tasks tab) also arrives in the chat, with buttons for your feedback.
+
+The conversation is saved in `data/runtime/chat.json`, so it survives a restart of the dashboard. Clear chat empties it
+and deletes its pictures. Long-term memories stay.
+
 When a tool call waits for your approval, Approve and Deny appear in the chat, above the message box. With the chat
 hidden or on a narrow window, they appear in a banner at the top instead. After you decide, the chat history holds the
 outcome, so you can ask the model "did that work?"

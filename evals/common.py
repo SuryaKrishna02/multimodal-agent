@@ -314,7 +314,7 @@ def _scorecard_cell(cell: dict | None) -> str:
         return f"{'':>16s}"
     v = cell["value"]
     mark = {True: "PASS", False: "FAIL", None: ""}[cell["pass"]]
-    vs = f"{v:.3f}" if isinstance(v, float) else str(v)
+    vs = "not measured" if v is None else f"{v:.3f}" if isinstance(v, float) else str(v)
     return f"{vs + ' ' + mark:>16s}"
 
 

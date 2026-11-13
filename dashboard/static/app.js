@@ -349,6 +349,7 @@ async function pollEvents() {
     if (!replaying) {
       ping(groupOf(ev.kind));
       noteChatStep(ev);
+      if (ev.kind === "evolve.brief") briefToChat(ev);
     }
   }
   replaying = false;
@@ -624,55 +625,188 @@ function addMsg(cls, html) {
   syncChatClear();
   return log.lastElementChild;
 }
-const callChip = (c) => `<span class="chip ${c.status === "ok" ? "ok" : c.status === "pending" ? "pending" : "bad"}"${c.call_id ? ` data-call-id="${c.call_id}"` : ""}>${esc(c.tool)} · ${esc(c.status === "pending" ? "needs your approval" : c.status)}</span>`;
+const callChip = (c) => `<span class="chip ${c.status === "ok" ? "ok" : c.status === "pending" ? "pending" : "bad"}"${c.call_id && c.status === "pending" ? ` data-call-id="${c.call_id}"` : ""}>${esc(c.tool)} · ${esc({ pending: "needs your approval", ok: c.call_id ? "approved" : "ok" }[c.status] || c.status)}</span>`;
+
+// What the agent read to answer: the memories that the search put into the system prompt.
+const recalled = (mems) => !mems?.length ? "" : `<details class="recalled"><summary>Recalled ${plural(mems.length, "memory", "memories")}</summary><ul>${
+  mems.map((m) => `<li><span class="rec-when">${esc(m.when)} · ${esc(m.level !== "raw" ? m.level : m.kind)}${m.score != null ? ` · match ${Number(m.score).toFixed(2)}` : ""}</span>${esc(short(m.text, 220))}</li>`).join("")}</ul></details>`;
+const replyMeta = (ui, turn) => {
+  const bits = [];
+  if (ui.seconds != null) bits.push(`${Number(ui.seconds).toFixed(1)} s`);
+  if (ui.tokens) bits.push(`${num(ui.tokens)} tokens of context`);
+  const inspect = turn != null ? ` · <button type="button" class="link" data-inspect="${turn}">Inspect in Brain</button>` : "";
+  return bits.length ? `<div class="msg-meta">${bits.join(" · ")}${inspect}</div>` : "";
+};
+function agentHtml(text, ui = {}, turn = null) {
+  if (ui.kind === "brief") return briefHtml(text, ui);
+  const calls = (ui.tool_calls || []).map(callChip).join("");
+  return `${md(text)}${calls ? `<div class="calls">${calls}</div>` : ""}${recalled(ui.memories)}${replyMeta(ui, turn)}`;
+}
+function userHtml(text, ui = {}) {
+  const pics = (ui.images || []).map((p) => zoomable(p, "Picture sent with the message")).join("");
+  const voice = ui.voice ? `<div class="msg-meta">Spoken · heard by ${esc(ui.voice.engine)} in ${Number(ui.voice.took_s).toFixed(1)} s</div>` : "";
+  return `${pics ? `<div class="msg-pics">${pics}</div>` : ""}<div class="msg-text">${esc(text)}</div>${voice}`;
+}
+// A brief arrives from the daemon (or the Tasks tab) as a message from the agent, with feedback buttons.
+function briefHtml(text, ui) {
+  return `<div class="brief-tag">End-of-day brief · prompt v${esc(ui.version)}</div>${md(text.replace(/^Here is your end-of-day brief:\s*/, ""))}
+    <div class="brief-rate" data-brief="${esc(ui.brief_id)}"><button type="button" class="small" data-rate="1">👍 Good</button>
+      <button type="button" class="small" data-rate="-1">Change something…</button></div>`;
+}
 
 // What the agent is doing now, shown in the reply bubble while the model works.
 let chatPending = null;
-const CHAT_STEPS = { "memory.search": () => "Searching memory…", "brain.request": () => "Waiting for the model…", "tools.call": (e) => `Ran ${e.tool}…` };
+const CHAT_STEPS = { "memory.search": () => "Searching memory…", "brain.request": () => "Waiting for the model…", "tools.call": (e) => `Ran ${e.tool}…`, "senses.stt": (e) => `Heard ${e.audio_s} s of speech…` };
 function noteChatStep(ev) {
   if (chatPending && CHAT_STEPS[ev.kind]) chatPending.dataset.step = CHAT_STEPS[ev.kind](ev);
 }
 
-$$("[data-suggest]").forEach((b) => (b.onclick = () => { $("#chat-input").value = b.dataset.suggest; $("#chat-input").focus(); }));
-$("#chat-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const text = $("#chat-input").value.trim();
-  if (!text) return;
+// The composer: a picture (picked, pasted or dropped), one screenshot, or your voice, next to the text.
+const composer = { image: null, screen: false };
+const input = $("#chat-input");
+const growInput = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
+input.addEventListener("input", growInput);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#chat-form").requestSubmit(); }
+});
+function renderAttach() {
+  const chips = [];
+  if (composer.image) chips.push(`<span class="attach"><img alt="" src="${composer.image}"><button type="button" data-unattach="image" aria-label="Remove the picture">×</button></span>`);
+  if (composer.screen) chips.push(`<span class="attach screen">Screenshot when you send<button type="button" data-unattach="screen" aria-label="Do not send the screen">×</button></span>`);
+  $("#chat-attach").innerHTML = chips.join("");
+  $("#chat-attach").hidden = !chips.length;
+  $("#chat-screen").setAttribute("aria-pressed", String(composer.screen));
+}
+function attachFile(file) {
+  if (!file?.type.startsWith("image/")) { toast("Only pictures can go into the chat. Use the Tasks tab for audio and video.", "error"); return; }
+  const reader = new FileReader();
+  reader.onload = () => { composer.image = reader.result; renderAttach(); input.focus(); };
+  reader.readAsDataURL(file);
+}
+$("#chat-file").onchange = (e) => { attachFile(e.target.files[0]); e.target.value = ""; };
+$("#chat-screen").onclick = () => { composer.screen = !composer.screen; renderAttach(); };
+$("#chat-attach").onclick = (e) => {
+  const b = e.target.closest("[data-unattach]");
+  if (b) { composer[b.dataset.unattach] = b.dataset.unattach === "screen" ? false : null; renderAttach(); }
+};
+$("#chat").addEventListener("paste", (e) => {
+  const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith("image/"));
+  if (file) { e.preventDefault(); attachFile(file); }
+});
+$("#chat").addEventListener("dragover", (e) => { e.preventDefault(); $("#chat").classList.add("dropping"); });
+$("#chat").addEventListener("dragleave", (e) => { if (!$("#chat").contains(e.relatedTarget)) $("#chat").classList.remove("dropping"); });
+$("#chat").addEventListener("drop", (e) => { e.preventDefault(); $("#chat").classList.remove("dropping"); attachFile(e.dataTransfer.files[0]); });
+
+$$("[data-suggest]").forEach((b) => (b.onclick = () => {
+  input.value = b.dataset.suggest;
+  if (b.dataset.screen) { composer.screen = true; renderAttach(); }
+  growInput();
+  input.focus();
+}));
+
+async function sendChat(text, voice = null) {
   if (appState && !appState.llm) { toast("The language model is not ready yet. Check the Serving tab.", "error"); return; }
-  const withScreen = $("#chat-screen").checked;
-  $("#chat-input").value = "";
-  $("#chat-screen").checked = false;   // one screenshot per tick: never keep sending the screen by accident
-  addMsg("user", `${esc(text)}${withScreen ? '<div class="msg-meta">with a screenshot</div>' : ""}`);
+  const body = { text, with_screen: composer.screen, image: composer.image, voice };
+  if (!text && !body.image && !body.with_screen) return;
+  composer.image = null;
+  composer.screen = false;   // one screenshot per message: never keep sending the screen by accident
+  renderAttach();
+  input.value = "";
+  growInput();
+  const sent = addMsg("user", userHtml(text || (body.image ? "What is in this picture?" : "What is on my screen?"), { voice, images: [] }));
+  if (body.image) sent.insertAdjacentHTML("afterbegin", `<div class="msg-pics"><img alt="Picture sent with the message" src="${body.image}"></div>`);
+  if (body.with_screen) sent.insertAdjacentHTML("beforeend", '<div class="msg-meta">with a screenshot</div>');
   const reply = addMsg("agent", "");
-  reply.dataset.step = withScreen ? "Capturing your screen…" : "Thinking…";
+  reply.dataset.step = body.with_screen ? "Capturing your screen…" : "Thinking…";
   working(reply, "Thinking…");
   chatPending = reply;
   syncChatClear();
-  const t0 = Date.now();
-  const out = await busy(e.submitter ?? $("#chat-form button"), () => api("/api/chat", { text, with_screen: withScreen }));
+  const out = await busy($("#chat-form .send"), () => api("/api/chat", body));
   chatPending = null;
   syncChatClear();
-  $("#chat-input").focus();
+  input.focus();
   if (!out) { reply.className = "msg agent error"; reply.textContent = "No reply: the request failed."; return; }
-  const calls = out.tool_calls.map(callChip).join("");
-  reply.innerHTML = `${md(out.text)}${calls ? `<div class="calls">${calls}</div>` : ""}<div class="msg-meta">${((Date.now() - t0) / 1000).toFixed(1)} s</div>`;
+  if (out.images?.length) sent.querySelector(".msg-pics")?.replaceWith(Object.assign(document.createElement("div"),
+    { className: "msg-pics", innerHTML: out.images.map((p) => zoomable(p, "Picture sent with the message")).join("") }));
+  await pollEvents();   // so the Brain tab has this turn, and Inspect can open it
+  reply.innerHTML = agentHtml(out.text, { tool_calls: out.tool_calls, memories: out.memories, seconds: out.seconds, tokens: out.tokens?.total }, groupTurns().length - 1);
   $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+}
+$("#chat-form").onsubmit = (e) => { e.preventDefault(); sendChat(input.value.trim()); };
+
+// Voice: the dashboard records with the same microphone code as Task 1, then Whisper (or Gemma) writes the text.
+let voiceOn = false;
+$("#chat-voice").onclick = async () => {
+  const b = $("#chat-voice");
+  if (!voiceOn) {
+    if (await busy(b, () => api("/api/chat/voice/start", {}))) {
+      voiceOn = true;
+      b.classList.add("recording");
+      b.setAttribute("aria-pressed", "true");
+      b.querySelector("span").textContent = "Stop and send";
+    }
+    return;
+  }
+  voiceOn = false;
+  b.classList.remove("recording");
+  b.setAttribute("aria-pressed", "false");
+  b.dataset.busy = "Listening back…";
+  const heard = await busy(b, () => api("/api/chat/voice/stop", {}));
+  b.querySelector("span").textContent = "Voice";
+  if (heard?.text) sendChat(heard.text, { engine: heard.engine, took_s: heard.took_s, audio_s: heard.audio_s });
 };
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-inspect]");
+  if (!b) return;
+  brainView.turn = Number(b.dataset.inspect);
+  brainView.call = null;
+  showTab("brain");
+});
+
 $("#chat-clear").onclick = (e) => busy(e.target, async () => {
   await api("/api/chat/clear", {});
   $("#chat-log").innerHTML = "";
   $("#chat-empty").hidden = false;
   toast("Chat cleared. Long-term memories stay.");
 }).finally(syncChatClear);
-// The server keeps the conversation over a reload, so show the same one the model still has.
+// The server keeps the conversation over a reload and a restart, so show the same one the model still has.
 async function loadChat() {
   let history;
   try { history = await api("/api/chat"); } catch { return; }
   for (const m of history) {
     if (m.approval) addApprovalMsg(m.approval.tool, m.approval);
-    else addMsg(m.role === "user" ? "user" : "agent", m.role === "user" ? esc(m.content) : md(m.content));
+    else if (m.role === "user") addMsg("user", userHtml(m.content, m.ui));
+    else addMsg(m.ui?.kind === "brief" ? "agent brief" : "agent", agentHtml(m.content, m.ui));
   }
 }
+
+// A new stored brief (from the daemon at 18:00, or the Tasks tab) joins the conversation once.
+async function briefToChat(e) {
+  if (replaying || !e.brief_id) return;   // eval briefs are not stored and have no id
+  const m = await api("/api/chat/brief", { brief_id: e.brief_id, markdown: e.markdown, version: e.version }).catch(() => null);
+  if (m && !$(`.brief-rate[data-brief="${e.brief_id}"]`)) addMsg("agent brief", agentHtml(m.content, m.ui));
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-rate]");
+  if (!b) return;
+  const row = b.closest(".brief-rate");
+  const rating = Number(b.dataset.rate);
+  if (rating < 0 && !row.querySelector("input")) {   // first click: ask what to change, in place
+    row.innerHTML = `<input aria-label="What should the next brief do differently?" placeholder="For example: put the deadlines first">
+      <button type="button" class="small primary" data-rate="-1">Send feedback</button>`;
+    const field = row.querySelector("input");
+    field.onkeydown = (k) => { if (k.key === "Enter") row.querySelector("button").click(); };
+    field.focus();
+    return;
+  }
+  const text = rating > 0 ? "Good brief." : row.querySelector("input").value.trim();
+  if (!text) return;
+  const out = await busy(b, () => api("/api/task4/feedback", { brief_id: Number(row.dataset.brief), rating, text }));
+  if (out) {
+    row.innerHTML = `<span class="msg-meta">Thanks. Saved as feedback (${plural(out.pending, "note")} wait for the next reflection in the Evolve tab).</span>`;
+  }
+});
 
 // --- Tasks ------------------------------------------------------------------
 let recordingSince = null;
@@ -912,6 +1046,7 @@ const METRICS = {
 };
 const metricInfo = (m) => METRICS[m] || [titleCase(m.replaceAll("_", " ")), "", ""];
 function fmtValue(v, unit) {
+  if (v === null || v === undefined) return '<span class="muted">not measured</span>';
   if (typeof v !== "number") return esc(v);
   if (unit === "pct") return `${+(v * 100).toFixed(1)}%`;
   const n = v >= 100 ? Math.round(v) : +v.toFixed(2);

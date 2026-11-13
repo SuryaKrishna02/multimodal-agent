@@ -106,7 +106,8 @@ stopped it.
 | `respond()` | The tool loop, up to 4 steps. A bad call is asked again, up to 2 retries. Thinking is on after a tool result. |
 
 Both `ask_json()` and `respond()` run the `part()`, `fit_budget()`, `send()` pipeline. Tasks call `ask_json()`. `cli.py
-chat` and `/api/chat` call `respond()` directly.
+chat` and `/api/chat` call `respond()` directly. `respond()` also returns the memories it recalled, so the chat can
+show what the reply was built from.
 
 ### 4 Memory: `agent/memory/episodic.py`
 
@@ -259,6 +260,7 @@ flowchart TB
 | `agent/memory/episodic.py` | Adds a level (raw, summary, fact), `covered_by`, `superseded_by` and a second vector for the screenshot or the audio clip. `search()` takes a mode (text, media or both) and a time window. |
 | `agent/evolve.py` | The brief prompt: locked blocks in code, plus a style block and a preference list in versioned rows. `reflect()` asks for a patch, and `validate_patch()` refuses anything outside the editable parts. `rollback()` makes any version active. |
 | `agent/tasks.py` | Task 3, `recall()`: a time window from the question ("this morning"), a search, and an answer that cites memory ids. Task 4, `daily_brief()`: the day's summaries, facts, action items and screen episodes, written with the active prompt version. |
+| `dashboard/chat.py` | The chat endpoints. A message can carry a picture, a screenshot or speech (the VAD keeps the speech, `stt.transcribe()` writes the text). Each message keeps `role` and `content` for the model and `ui` for the page (pictures, recalled memories, tool calls, timings). The conversation is saved in `config.CHAT_FILE`, so it survives a restart. A stored daily brief joins the conversation once. |
 | `dashboard/always_on.py` | The Session 2 endpoints. While the daemon runs, the dashboard queues jobs for it. Without a daemon, it runs them itself through the same handlers. |
 | `scripts/soak.py` | Runs a daemon for hours under load and records its memory and missed events. |
 

@@ -198,6 +198,24 @@ class Consolidation(TempRuntime):
         self.assertTrue(second["reused"])
         self.assertEqual(second["summary_id"], first["summary_id"])
 
+    def test_a_citation_copied_into_the_text_is_removed(self) -> None:
+        """Drop a "Sources: [1]" suffix: it is a citation, not part of what the claim says."""
+        items = [{"text": "Plumber fixes the sink on Monday. Sources: [1, 2]", "sources": [1]}]
+        kept, bad = consolidate._cited(items, {1})
+        self.assertEqual((kept[0]["text"], bad), ("Plumber fixes the sink on Monday.", 0))
+        same = [{"text": "Room 12 is booked for 3 people", "sources": [1]}]
+        self.assertEqual(consolidate._cited(same, {1})[0][0]["text"], "Room 12 is booked for 3 people")
+
+    def test_a_failed_model_reply_leaves_the_rows_for_the_next_run(self) -> None:
+        """No valid JSON: nothing is marked covered, so forget() can never delete rows that no summary holds."""
+        rows = consolidate.pending(force=True)[0]
+        with mock.patch.object(consolidate.brain, "ask_json", return_value=(None, {})):
+            out = consolidate.summarize_window(rows)
+        self.assertTrue(out["failed"])
+        self.assertEqual(len(consolidate.pending(force=True)[0]), 3)
+        later = time.time() + (config.RAW_RETENTION_DAYS + 1) * 86400
+        self.assertEqual(consolidate.forget(now=later)["deleted"], 0)
+
     def test_forget_deletes_only_covered_rows_past_retention(self) -> None:
         """Rows that no summary covers stay, however old."""
         rows = consolidate.pending(force=True)[0]
@@ -206,6 +224,17 @@ class Consolidation(TempRuntime):
         later = time.time() + (config.RAW_RETENTION_DAYS + 1) * 86400
         self.assertEqual(consolidate.forget(now=later)["deleted"], 2)
         self.assertEqual([r["id"] for r in episodic.query_rows("level = 'raw'")], [self.ids[2]])
+
+
+class ResetDatabase(TempRuntime):
+    """An eval deletes its throwaway database between cases; the next connection must create the tables again."""
+
+    def test_tables_come_back_after_the_file_is_deleted(self) -> None:
+        """The same process opens, deletes and reopens the file, as `evals.common.reset` does."""
+        self.assertEqual(consolidate.stats()["raw"]["rows"], 0)
+        for f in config.MEMORY_DB.parent.glob(config.MEMORY_DB.name + "*"):
+            f.unlink()
+        self.assertEqual(consolidate.stats()["raw"]["rows"], 0)
 
 
 class LockedBlocks(TempRuntime):
@@ -247,6 +276,64 @@ class LockedBlocks(TempRuntime):
         v2 = evolve.render(evolve.get_version())
         self.assertEqual(evolve.render(evolve.rollback(1)), v1)
         self.assertEqual(evolve.render(evolve.rollback(v2_id)), v2)
+
+
+class EvalScoring(unittest.TestCase):
+    """The Session 2 evals score what they claim to, from records alone (no model)."""
+
+    @staticmethod
+    def _round(folder: str, n: int, ok: bool, day: str) -> dict:
+        return {
+            "op": "round",
+            "folder": folder,
+            "round": n,
+            "dev": 1.0 if ok else 0.0,
+            "test": 1.0 if ok else 0.0,
+            "checks": {day: {"p": ok}},
+            "splits": {day: "test"},
+            "locked_broken": 0,
+            "rejected": 0,
+        }
+
+    def test_task4_scores_each_case_folder_from_its_own_seed(self) -> None:
+        """Synthetic and user folders have different days: each is compared with its own round 0."""
+        from evals.task4 import eval as task4
+
+        records = [
+            self._round("synthetic", 0, False, "d5"),
+            self._round("synthetic", 1, True, "d5"),
+            self._round("user", 0, True, "u1"),
+            self._round("user", 1, True, "u1"),
+        ]
+        out = task4.score(records)
+        self.assertEqual(out["test_gain"], 0.5)  # mean of +1.0 and 0.0
+        self.assertEqual(out["regression_rate"], 0.0)
+
+    def test_task3_names_the_stage_that_lost_the_answer(self) -> None:
+        """Misheard -> hearing; heard but not read -> retrieval; read but answered wrong -> answer."""
+        from evals.task3 import eval as task3
+
+        item = {"must_mention": [["priya"]], "unanswerable": False}
+        heard_ok, heard_bad = ["Priya sends the deposit"], ["Kriya sends the deposit"]
+        self.assertEqual(task3.failed_at(item, False, heard_bad, heard_bad), "hearing")
+        self.assertEqual(task3.failed_at(item, False, heard_ok, ["the offsite is on the 14th"]), "retrieval")
+        self.assertEqual(task3.failed_at(item, False, heard_ok, heard_ok), "answer")
+        self.assertIsNone(task3.failed_at(item, True, heard_ok, heard_ok))
+
+    def test_task3_accepts_the_ways_a_model_says_it_does_not_know(self) -> None:
+        """An abstention in other words counts; a hedge that cites a memory, or an answer, does not."""
+        from evals.task3 import eval as task3
+
+        item = {"must_mention": [], "unanswerable": True}
+        for answer in (
+            "I do not know.",
+            "The memories do not contain any information about the catering.",
+            "There is no information about catering.",
+            "The memories don't mention catering.",
+        ):
+            self.assertTrue(task3.correct(item, answer, []), answer)
+        self.assertFalse(task3.correct(item, "I do not know, but probably pizza.", [4]))
+        self.assertFalse(task3.correct(item, "We picked the vegetarian caterer.", []))
 
 
 class TimeWindow(unittest.TestCase):

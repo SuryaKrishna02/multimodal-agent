@@ -28,10 +28,11 @@ def connect(path: Path, init: str | Callable[[sqlite3.Connection], None] = "") -
         sqlite3.Connection: The open connection. It commits when the block ends without an error.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    existed = path.exists()  # before connect(), which creates an empty file
     db = sqlite3.connect(path, timeout=10)
     try:
         with _init_lock:
-            if str(path) not in _ready or not path.exists():  # a deleted file (tests, a reset) needs its tables again
+            if str(path) not in _ready or not existed:  # a deleted file (an eval reset, a test) needs its tables again
                 db.execute("PRAGMA journal_mode=WAL")
                 db.executescript(init) if isinstance(init, str) else init(db)
                 db.commit()

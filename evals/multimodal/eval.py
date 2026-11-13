@@ -12,8 +12,10 @@ vector of EmbeddingGemma-2. Then each query searches three ways:
     both   the better score of the two for each row (the default search)
 
 Metrics: <modality>_recall_<mode>, the share of queries whose item is in the top 3, for example image_recall_both,
-and <modality>_top1_<mode>, the share whose item comes first. With 8 to 10 items per modality, the top 3 is easy
-(chance alone is 30 to 37%), so the top-1 numbers tell the modes apart better.
+and <modality>_top1_<mode>, the share whose item comes first. Images and clips share one database, so
+every query competes with every item. `chance_recall` and `chance_top1` are what random ranking scores
+(3/items and 1/items): read each number against them. `items_rejected` counts items that the junk filter
+refused to store; a query for one of them can never succeed.
 """
 
 import json
@@ -46,11 +48,16 @@ def load_cases(cases_dir: Path):
     Raises:
         NoCases: If `queries.jsonl` is missing.
     """
-    q = cases_dir / "queries.jsonl"
-    if not q.exists():
+    rows = _queries(cases_dir)
+    if not rows:
         raise NoCases(cases_dir)
-    rows = [json.loads(x) for x in q.read_text().splitlines() if x.strip()]
+    _stored.clear()  # a new run (or rebuilt cases) stores the items again, in an empty database
     return [{**r, "folder": str(cases_dir)} for r in rows]
+
+
+def _queries(folder: Path) -> list[dict]:
+    q = folder / "queries.jsonl"
+    return [json.loads(x) for x in q.read_text().splitlines() if x.strip()] if q.exists() else []
 
 
 def describe(path: Path, modality: str) -> str:
@@ -73,7 +80,7 @@ def describe(path: Path, modality: str) -> str:
 
 
 def _prepare(folder: Path, rows: list[dict]) -> dict[int, str]:
-    """Store every item of a folder once, in the (empty) eval database."""
+    """Store every item of a folder once, in the (empty) eval database. Returns {row id: item file name}."""
     ids = {}
     for name, modality in sorted({(r["item"], r["modality"]) for r in rows}):
         path = folder / name
@@ -100,9 +107,11 @@ def run_item(item):
         if item["folder"] not in _stored:  # first query of this folder: start from an empty database
             common.reset(db_folder)
             _stored.clear()
-            _stored[item["folder"]] = _prepare(folder, load_cases(folder))
+            _stored[item["folder"]] = _prepare(folder, _queries(folder))
         ids = _stored[item["folder"]]
-        rec = {"query": item["query"], "item": item["item"], "modality": item["modality"]}
+        items = {r["item"] for r in _queries(folder)}
+        rec = {"query": item["query"], "item": item["item"], "modality": item["modality"], "stored": len(ids)}
+        rec["items"], rec["item_stored"] = len(items), item["item"] in ids.values()
         for mode in MODES:
             top = [ids.get(h["id"]) for h in episodic.search(item["query"], k=3, mode=mode)]
             rec[f"top3_{mode}"], rec[f"found_{mode}"] = top, item["item"] in top
@@ -119,7 +128,12 @@ def score(records):
     Returns:
         dict: Metric name to value.
     """
-    out = {}
+    n = max(r.get("stored") or 1 for r in records)
+    out = {
+        "chance_recall": round(min(1.0, 3 / n), 3),
+        "chance_top1": round(1 / n, 3),
+        "items_rejected": max(r.get("items", 0) - r.get("stored", 0) for r in records),
+    }
     for modality in sorted({r["modality"] for r in records}):
         rs = [r for r in records if r["modality"] == modality]
         for mode in MODES:

@@ -11,6 +11,7 @@ forget() deletes raw rows that a summary covers once they are older than RAW_RET
 judge() is the faithfulness check of the eval: a separate request reads one claim and only the rows it cites.
 """
 
+import re
 import time
 from pathlib import Path
 
@@ -38,12 +39,17 @@ SCHEMA = {
 }
 
 PROMPT = """Above are raw memories from one stretch of time. Each starts with its [id].
-Summarize them in at most {n} claims: merge related memories into one claim, and keep each claim short.
+Summarize them in at most {n} claims: merge related memories into one claim.
+Write each claim in note style, shorter than the memories it merges: keep names, dates, times, numbers and
+decisions, and drop filler words such as "is scheduled to" or "it was decided that".
 Each claim cites the [id]s of the raw memories that support it in "sources".
 Then list facts worth keeping after today, one short sentence each: decisions, dates, deadlines, names.
 Each fact also cites raw memory [id]s. The "Known facts" are listed as [F<number>]: never cite them as sources.
 If a new fact makes a known fact no longer true, put that known fact's number in "replaces".
 Do not add anything that the memories do not say."""
+
+# The model sometimes copies its citation into the text ("... Monday. Sources: [1]"). The ids belong in "sources".
+CITED_SUFFIX = re.compile(r"\s*\(?\b(?:sources?|ids?)\s*:\s*\[?[\d,\s\[\]]*\]?\)?\.?\s*$", re.I)
 
 JUDGE = {
     "type": "object",
@@ -123,8 +129,9 @@ def _cited(items: list[dict], allowed: set[int]) -> tuple[list[dict], int]:
     for it in items:
         good = [i for i in it["sources"] if i in allowed]
         bad += len(it["sources"]) - len(good)
-        if good and it["text"].strip():
-            kept.append({**it, "sources": good})
+        text = CITED_SUFFIX.sub("", it["text"]).strip()
+        if good and text:
+            kept.append({**it, "text": text, "sources": good})
     return kept, bad
 
 
@@ -150,7 +157,16 @@ def summarize_window(rows: list[dict]) -> dict:
         text += "\n\nKnown facts:\n" + "\n".join(f"[F{f['id']}] {f['text']}" for f in known)
     prompt = PROMPT.format(n=max(1, -(-len(rows) // 3)))  # about one claim per three raw rows
     data, _ = brain.ask_json([brain.part("text", text + "\n\n" + prompt)], SCHEMA)
-    data = data or {"claims": [], "facts": []}
+    if data is None:  # no valid JSON: leave the rows uncovered, so forget() cannot delete them unsummarized
+        events.emit("memory.consolidate_failed", window=key, rows=len(rows))
+        return {
+            "summary_id": None,
+            "fact_ids": [],
+            "claims": [],
+            "invalid_citations": 0,
+            "reused": False,
+            "failed": True,
+        }
     claims, bad_c = _cited(data["claims"], set(ids))
     facts, bad_f = _cited(data["facts"], set(ids))
     fact_ids = _store_facts(facts, {f["id"] for f in known}, rows[-1]["ts"])

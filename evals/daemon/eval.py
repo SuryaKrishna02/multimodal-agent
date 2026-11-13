@@ -11,8 +11,9 @@ Metrics:
     recovery_s            seconds from the restart until the next unfinished step starts (worst case)
     redone_steps          finished steps that ran again after the restart (must be 0)
     lost_jobs             jobs that never finished after the restart
-    soak_hours            length of the newest soak run
-    rss_growth_mb_per_h   daemon memory growth over the soak, from a straight-line fit
+    soak_hours            length of the newest soak run, wall clock
+    soak_awake_hours      the part of it the machine was awake (under SOAK_MIN_HOURS the record warns)
+    rss_growth_mb_per_h   daemon memory growth over the soak, from a straight-line fit (None: too short to fit)
     missed_events         schedule slots and queued jobs that the soak saw go missing
 """
 
@@ -33,6 +34,7 @@ CASES = [
     {"op": "soak"},
 ]
 TIMEOUT_S = 90
+SOAK_MIN_HOURS = 1.0  # shorter soaks prove the script works, not that the daemon stays small
 
 
 def load_cases(_cases_dir: Path):
@@ -133,7 +135,11 @@ def soak(_item: dict) -> dict:
     files = sorted((config.RESULTS / "soak").glob("*.json"))
     if not files:
         return {"op": "soak", "found": False, "hint": "run: python scripts/soak.py --hours 3"}
-    return {"op": "soak", "found": True, "file": str(files[-1]), **json.loads(files[-1].read_text())["summary"]}
+    rec = {"op": "soak", "found": True, "file": str(files[-1]), **json.loads(files[-1].read_text())["summary"]}
+    awake = rec.get("awake_hours", rec["soak_hours"])
+    if awake < SOAK_MIN_HOURS:
+        rec["warning"] = f"only {awake} h awake: run python scripts/soak.py --hours 3, lid open, for a growth number"
+    return rec
 
 
 def run_item(item):
@@ -167,4 +173,5 @@ def score(records):
     for r in records:
         if r["op"] == "soak" and r.get("found"):
             out |= {k: r[k] for k in ("soak_hours", "rss_growth_mb_per_h", "missed_events")}
+            out["soak_awake_hours"] = r.get("awake_hours", r["soak_hours"])
     return out

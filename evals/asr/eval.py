@@ -8,23 +8,31 @@ Metric: WER = (substitutions + deletions + insertions) / reference words,
 after lowercasing, removing punctuation and removing fillers (um, uh, ...) on both sides.
 
 Session 2 adds Whisper (the accelerator's `transcribe` hook) for always-on listening:
-    wer / gemma_s           Gemma 4 through llama-server, and its seconds per clip
-    whisper_wer / whisper_s Whisper large-v3-turbo, and its seconds per clip
+    wer / gemma_s / gemma_rtf               Gemma 4 through llama-server
+    whisper_wer / whisper_s / whisper_rtf   Whisper large-v3-turbo
+`_s` is the median seconds per clip. `_rtf` is the real-time factor: seconds of work per second of audio,
+so 0.1 means 10 s of speech is transcribed in 1 s. Always-on listening needs an RTF well under 1.
+Each engine first transcribes one second of silence, untimed: Whisper loads its weights on the first
+call, and that one-time cost is not a property of each clip.
 If the accelerator has no transcribe hook, the Whisper metrics are left out.
 """
 
 import re
+import statistics
 import time
 from pathlib import Path
 
 import jiwer
+import numpy as np
 
+from agent import config
 from agent.platforms.base import Unsupported
 from agent.senses import audio, stt
 from evals.common import NoCases
 
 LEVEL, USES_LLM = "component", True
 FILLERS = {"um", "uh", "erm", "er", "hmm", "mm"}
+_warm: set[str] = set()  # engines that already ran once in this process
 
 
 def normalize(text: str) -> str:
@@ -73,16 +81,29 @@ def run_item(item):
     """
     samples = audio.load_wav(item["wav"])
     rec = {"file": item["wav"].name, "audio": str(item["wav"]), "reference": item["reference"]}
+    rec["audio_s"] = round(len(samples) / config.SAMPLE_RATE, 2)
     for engine, prefix in (("gemma", ""), ("whisper", "whisper_")):
-        t0 = time.time()
         try:
+            warm_up(engine)
+            t0 = time.time()
             hyp = stt.transcribe(samples, engine)
         except Unsupported:
             continue  # this accelerator has no Whisper: report Gemma only
-        rec |= {f"{prefix}hypothesis": hyp, f"{prefix}errors": errors(item["reference"], hyp)}
         rec[f"{engine}_s"] = round(time.time() - t0, 2)
+        rec |= {f"{prefix}hypothesis": hyp, f"{prefix}errors": errors(item["reference"], hyp)}
     rec["ref_words"] = len(normalize(item["reference"]).split())
     return rec
+
+
+def warm_up(engine: str) -> None:
+    """Run an engine once on one second of silence, so loading its weights is not timed as a clip.
+
+    Args:
+        engine (str): "gemma" or "whisper".
+    """
+    if engine not in _warm:
+        stt.transcribe(np.zeros(config.SAMPLE_RATE, np.float32), engine)
+        _warm.add(engine)
 
 
 def errors(reference: str, hypothesis: str) -> int:
@@ -110,8 +131,20 @@ def score(records):
     """
     words = max(sum(r["ref_words"] for r in records), 1)
     out = {"wer": round(sum(r["errors"] for r in records) / words, 3)}
-    out["gemma_s"] = round(sum(r.get("gemma_s", 0) for r in records) / max(len(records), 1), 2)
+    out |= _speed(records, "gemma")
     if all("whisper_errors" in r for r in records):
         out["whisper_wer"] = round(sum(r["whisper_errors"] for r in records) / words, 3)
-        out["whisper_s"] = round(sum(r["whisper_s"] for r in records) / max(len(records), 1), 2)
+        out |= _speed(records, "whisper")
+    return out
+
+
+def _speed(records: list[dict], engine: str) -> dict:
+    """Median seconds per clip and the real-time factor of one engine."""
+    took = [r[f"{engine}_s"] for r in records if f"{engine}_s" in r]
+    audio_s = sum(r.get("audio_s", 0) for r in records if f"{engine}_s" in r)
+    if not took:
+        return {}
+    out = {f"{engine}_s": round(statistics.median(took), 2)}
+    if audio_s:
+        out[f"{engine}_rtf"] = round(sum(took) / audio_s, 3)
     return out

@@ -53,6 +53,7 @@ agent/
   events.py          event log in SQLite, shared by the daemon, the dashboard and the CLI
   sql.py             opens every SQLite file and always closes it
 dashboard/           FastAPI + one HTML page; one tab per component, plus tasks and the scorecard
+  chat.py            the chat: text, picture, screen or voice in; reply with recalled memories; kept over restarts
 cli.py               every action from the terminal
 evals/<component>/   case format (docstring), loader, scorer
 evals/synthetic/     generates the synthetic cases (speech, screenshots, tool calls, memories)

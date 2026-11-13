@@ -379,6 +379,71 @@ learned preference cannot change the locked text, but it can still win over a lo
   That shell probably lacks Screen Recording permission. This is the Session 1 `record_screen` hook, and Session 2 did
   not change it.
 
+## Session 2 review (2026-11-11)
+
+Every eval ran again on E4B after the fixes below (`python evals/run_all.py --run --tier e4b`).
+
+### Consolidation wrote longer claims than the raw rows
+
+`compression_ratio` was 1.31, then 1.17 on the next run, below the 1.5 target. The raw rows of the synthetic day logs
+are already short notes (about 55 characters), and E4B rewrote them as full sentences: "The plumber is scheduled to
+fix the kitchen sink on Monday morning." The prompt said "keep each claim short", and that was not enough.
+
+The prompt now asks for note style, "shorter than the memories it merges", and names the filler to drop. Two runs gave
+`compression_ratio` 1.65, with `faithfulness` 1.0 and `recall_after` 0.933, the same as before the change, and Task 3
+stayed at 8 of 8. The threshold did not change. A claim now reads "Plumber fixes kitchen sink Monday morning."
+
+With the shorter style, E4B sometimes copied its citation into the text ("... Monday morning. Sources: [1]").
+`consolidate._cited()` now removes a "Sources: [...]" suffix, because the ids belong in `sources`.
+
+### Speech to text speed, after a warm-up
+
+The asr eval now makes one untimed call per engine first and reports the real-time factor. On the 10 synthetic clips,
+Whisper large-v3-turbo had an RTF of 0.30 and Gemma 4 E4B 0.29: on short clips Whisper is not faster. It is still the
+default for always-on listening, because it keeps the language model free for the user (see `agent/senses/stt.py`).
+
+### Session 2 on E2B, the first run
+
+Every eval also ran on E2B (`--tier e2b`). Session 2 had only run on E4B before.
+
+| Eval | E2B | E4B | Notes |
+|---|---|---|---|
+| `consolidation` | faithfulness 1.00, invalid citations **10.5% (FAIL)**, compression 1.57 | 1.00, 0%, 1.65 | E2B cited 1 id outside the window in each log. The code dropped both before storing, which is the reason the check exists. E2B also wrote far fewer facts (0.11 per raw row against 0.58). |
+| `task3` | accuracy 1.00, abstain 1.00 | 1.00, 1.00 | See the scorer fix below. |
+| `task4` | test gain +0.50, dev after 0.79, 1 patch refused, overfit leak 1.00 | +0.50, 0.96, 0, 1.00 | The one-day rule leaked into every held-out day on both tiers. |
+| `asr` | Gemma WER 0.053, RTF 0.17; Whisper WER 0.026, RTF 0.33 | 0.044, 0.29; 0.026, 0.30 | E2B transcribes faster than Whisper on these short clips, at twice the word errors. |
+
+**The Task 3 scorer missed an abstention.** E2B answered the question that nobody spoke about with "The memories do
+not contain any information about what was decided regarding the catering", cited nothing, and the eval scored it
+wrong: the "I do not know" pattern only knew a few phrasings. `evals/task3/eval.py` now accepts "does not contain /
+mention / say" and "no / any information", and a test covers both sides (a hedge that cites a memory still fails).
+With the fix, E2B scores 1.00 on `abstain_rate`. The model did not change; the measurement did.
+
+### The soak and a sleeping Mac
+
+`python scripts/soak.py --hours 1` ran on E4B and took 13.8 hours of wall clock. The samples stop at 14 minutes, one
+comes at 46 minutes, and the loop ended the next morning: the Mac slept twice, although the daemon held `caffeinate`
+(keep-awake stops idle sleep, not a closed lid or a sleep from the menu). The daemon reported 38 schedule slots as
+missed, correctly, and the soak counted them as 38 missed events.
+
+The soak now finds the sleep gaps (no sample for 3 minutes) and counts a slot inside one as `missed_while_asleep`.
+The same run then reads: awake 0.23 h, missed events 0, missed while asleep 38, no late heartbeat, no job lost,
+daemon memory 1.94 GB flat (Whisper loaded), growth 3.4 MB/h. With 0.23 awake hours that growth number rests on a few
+samples, so the `daemon` record warns. A multi-hour soak with the lid open is still to do.
+
+### Fixed
+
+- **An eval reset left a database with no tables.** `sql.connect()` checked whether the file existed after
+  `sqlite3.connect()`, which creates an empty file. After `evals.common.reset()` deleted a database, the next query in
+  the same process failed with "no such table". Any second case folder (your own cases next to the synthetic ones) in
+  `consolidation`, `multimodal`, `task3` or `task4` hit this.
+- **Task 4 scored one folder's first round against another folder's last round**, and raised a KeyError when you
+  added your own days. Each folder is now scored against its own seed.
+- **A failed summary request marked the rows as covered.** With no valid JSON, the rows were marked covered by summary
+  0, and `forget()` would delete them after 7 days without a summary. They now stay for the next run.
+- **The soak script lost its result when the daemon had died**, because terminating a missing process raised. A sample
+  where the daemon is not running now counts as a missed event.
+
 ## Not verified yet
 
 - Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool
@@ -391,5 +456,7 @@ learned preference cannot change the locked text, but it can still win over a lo
 - Session 2, `daemon install` (launchd): the plist and the commands are written but were not run, because they change
   your login items. It is also unknown whether a process that launchd starts gets the Microphone permission.
 - Session 2, notifications: `osascript` exited with code 0, but nobody looked at the screen to see the notification.
-- Session 2, a soak of several hours: only an 8-minute check of `scripts/soak.py` ran (see "Soak and the dashboard endpoints").
-- Session 2 evals on E2B: every Session 2 number above is E4B.
+- Session 2, a soak of several hours while the machine stays awake: the longest awake stretch so far is 0.23 h
+  (see "The soak and a sleeping Mac").
+- The voice button of the dashboard chat with a real microphone: a unit test covers it with a mocked microphone. The
+  picture and the daily brief in the chat were tried in the dashboard with E4B.

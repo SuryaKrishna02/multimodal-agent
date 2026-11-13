@@ -17,16 +17,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from agent import brain, config, daemon, events, hotkey, serving, tasks, tools
+from agent import config, daemon, events, hotkey, serving, tasks, tools
 from agent.memory import episodic
-from agent.senses import audio, screen, video
-from dashboard import always_on
+from agent.senses import audio, video
+from dashboard import always_on, chat
 from evals import common as evals_common
 
-state = {"tier": config.TIER, "history": [], "mic": None}
+state = {"tier": config.TIER, "mic": None}
 llm, emb = serving.llm_server(), serving.embed_server()
-# Held while the model replies, so an approval during a reply cannot put its outcome before that turn in the history.
-chat_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -61,6 +59,7 @@ async def lifespan(_app):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(always_on.router)
+app.include_router(chat.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -159,50 +158,6 @@ def bench():
     r = serving.stream_timing([{"role": "user", "content": "Explain what a context window is in 80 words."}])
     events.emit("serving.bench", tier=state["tier"], rss_gb=round(llm.rss_gb(), 2), **r)
     return r
-
-
-# --- Chat ----------------------------------------------------------------------
-
-
-@app.get("/api/chat")
-def chat_history():
-    """List the chat so far, so a page reload shows the same conversation the model still has.
-
-    Returns:
-        list[dict]: Messages with `role` and `content`, oldest first. An approval outcome also has `approval`.
-    """
-    return state["history"]
-
-
-@app.post("/api/chat/clear")
-def chat_clear():
-    """Start a new chat. Long-term memories stay.
-
-    Returns:
-        list: An empty list.
-    """
-    state["history"] = []
-    return []
-
-
-@app.post("/api/chat")
-def chat(body: dict):
-    """Answer one chat message, with tools and memory. The last 6 history messages are sent.
-
-    Args:
-        body (dict): JSON with `text` and optional `with_screen`, which attaches a screenshot.
-
-    Returns:
-        dict: `text`, `tool_calls`, `tokens` and `tools_offered`.
-    """
-    user = [brain.part("text", body["text"])]
-    if body.get("with_screen"):
-        user.insert(0, brain.part("image", screen.capture()))
-    with chat_lock:
-        history = [{"role": m["role"], "content": m["content"]} for m in state["history"][-6:]]
-        out = brain.respond(user, history=history)
-        state["history"] += [{"role": "user", "content": body["text"]}, {"role": "assistant", "content": out["text"]}]
-    return out
 
 
 # --- Senses + tasks ------------------------------------------------------------
@@ -324,7 +279,7 @@ def media(path: str):
     """Serve a captured or recorded file.
 
     Args:
-        path (str): File path under the runtime or eval case folder.
+        path (str): File path under the runtime folder, the eval cases or the eval results (Task 2 videos).
 
     Returns:
         FileResponse: The file.
@@ -333,7 +288,7 @@ def media(path: str):
         HTTPException: 403 if the path is outside those folders.
     """
     p = Path(path).resolve()
-    if not (p.is_relative_to(config.RUNTIME.resolve()) or p.is_relative_to(config.EVAL_DATA.resolve())):
+    if not any(p.is_relative_to(root.resolve()) for root in (config.RUNTIME, config.EVAL_DATA, config.RESULTS)):
         raise HTTPException(403)
     return FileResponse(p)
 
@@ -401,9 +356,9 @@ def approve(body: dict):
     Returns:
         dict: The result of `tools.approve`.
     """
-    out = tools.approve(int(body["call_id"]), bool(body["yes"]))
-    with chat_lock:
-        state["history"].append({**brain.approval_note(out), "approval": out})
+    call_id = int(body["call_id"])
+    out = tools.approve(call_id, bool(body["yes"]))
+    chat.note_approval(call_id, out)
     return out
 
 
