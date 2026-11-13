@@ -370,6 +370,68 @@ dentist, mentioned Dr. Lee, and held-out compliance dropped by 0.08. One held-ou
 mentioned in the context of today's activities". That sentence breaks the locked rule "Never invent an event". A
 learned preference cannot change the locked text, but it can still win over a locked instruction in the model.
 
+### The generality gate (2026-11-13)
+
+`evolve.reflect()` now checks a new version before it becomes active. It writes briefs with the parent and the new
+version for `config.EVOLVE_GATE_DAYS` (3) recent days. Then `evolve.ungrounded()` finds names and numbers that the
+day's memories never say. A patch whose briefs invent more than the parent's did (`EVOLVE_GATE_MAX_INVENTED` = 0) is
+refused. In the eval the gate days are the dev days. `config.THRESHOLDS` did not change.
+
+The first version of the check also took capitalized words in the headline for names. E4B writes title-case
+headlines such as "End-of-Day Brief", so every brief was flagged for "Brief" and "Day", and `invented_rate` was 1.0
+even with the seed prompt. Headlines are titles like headings, so the check now reads only their numbers. Run again on
+the stored briefs of that run, the seed and the normal rounds had nothing flagged. After the overfit rounds, the
+check flagged "Lee" on all 4 test days.
+
+`python evals/run_all.py --run task4 --tier <tier>`. "Gate off" is the same code with `EVOLVE_GATE_DAYS = 0`, set by
+a wrapper script for the run, not in `config.py`:
+
+| E4B | Gate off | Gate on |
+|---|---|---|
+| `dev_before` → `dev_after` | 0.50 → 0.96 | 0.50 → 0.96 |
+| `test_before` → `test_after` (`test_gain`) | 0.50 → 1.00 (+0.50) | 0.50 → 1.00 (+0.50) |
+| `regression_rate`, `locked_edits`, `patches_rejected` | 0, 0, 0 | 0, 0, 0 |
+| `gate_refused` (normal rounds) | 0 | 0 |
+| `invented_rate_before`, `invented_rate` (test briefs) | 0.00, 0.00 | 0.00, 0.00 |
+| `overfit_patches_refused` (of 3) | 0 | **3** |
+| `overfit_test_leak` | **1.00** | **0.00** |
+| `overfit_invented_rate` | 1.00 | 0.00 |
+| `overfit_dev_gain` | 1 | 0 |
+| `overfit_test_change` | -0.08 | 0.00 |
+| Run time | 352 s | 664 s |
+
+With the gate off, the overfit version learned "Always mention Dr. Lee in the first bullet", and each of the 4
+held-out briefs named Dr. Lee ("Dr. Lee was mentioned in relation to the offsite agenda ..."). With the gate on, each
+of the 3 overfit patches was refused with "Lee" as the invented word, so the seed prompt stayed active. The normal
+rounds learned the same 3 preferences as with the gate off, and the gate refused none of them. `overfit_dev_gain`
+drops to 0 because the one-day rule never becomes active, which is the intent. The gate costs 2 briefs per gate day
+per reflection, so the eval took about twice as long.
+
+| E2B | Gate off | Gate on |
+|---|---|---|
+| `dev_before` → `dev_after` | 0.50 → 0.79 | 0.50 → 0.79 |
+| `test_before` → `test_after` (`test_gain`) | 0.50 → 1.00 (+0.50) | 0.50 → 1.00 (+0.50) |
+| `regression_rate`, `locked_edits`, `patches_rejected` | 0, 0, 1 | 0, 0, 1 |
+| `gate_refused` (normal rounds) | 0 | 0 |
+| `invented_rate_before`, `invented_rate` (test briefs) | 0.00, 0.00 | 0.00, 0.00 |
+| `overfit_patches_refused` (of 3) | 0 | **3** |
+| `overfit_test_leak` | **1.00** | **0.00** |
+| `overfit_invented_rate` | 0.75 | 0.00 |
+| `overfit_dev_gain` | 1 | 0 |
+| `overfit_test_change` | -0.08 | 0.00 |
+| Run time | 226 s | 376 s |
+
+On E2B the gate also refused all 3 overfit patches for "Lee". `patches_rejected` is 1 with the gate on and off. It
+is a round 3 patch that the validator refused or that changed nothing (the record does not keep which), not the gate. With the gate off, `overfit_invented_rate` is 0.75,
+not 1.00: the d5 brief leaked only through its headline "Dentist Summary", and the check does not read headline
+words as names. That is the known gap (see `docs/EVALS.md`). The gate still caught the rule, because the same
+version also named Dr. Lee on the other days.
+
+What the gate does not prove: the eval has one overfitting example, and the gate days are 3 of the 4 dev days. A
+one-day rule that invents nothing the check can see (lower-case words, or a word that some memory has) still passes.
+The daemon gates on the days in the `briefs` table. No stored days means the gate checks nothing (`gate_days` 0 in
+the result). That path is covered by a unit test, not by a live run.
+
 ### Found while testing
 
 - **Two requests upgraded one database at once.** The dashboard opened a Session 1 memory database from two requests,
@@ -392,4 +454,4 @@ learned preference cannot change the locked text, but it can still win over a lo
   your login items. It is also unknown whether a process that launchd starts gets the Microphone permission.
 - Session 2, notifications: `osascript` exited with code 0, but nobody looked at the screen to see the notification.
 - Session 2, a soak of several hours: only an 8-minute check of `scripts/soak.py` ran (see "Soak and the dashboard endpoints").
-- Session 2 evals on E2B: every Session 2 number above is E4B.
+- Session 2 evals on E2B: every Session 2 number above is E4B, except the generality gate tables.

@@ -249,6 +249,95 @@ class LockedBlocks(TempRuntime):
         self.assertEqual(evolve.render(evolve.rollback(v2_id)), v2)
 
 
+DAY = ["(09:10, summary) The offsite agenda has three workshops.", "(14:00, fact) Anita approved the budget at 2pm."]
+
+
+def brief(*bullets: str, headline: str = "Offsite agenda and budget") -> dict:
+    """Build a brief with one section."""
+    return {"headline": headline, "sections": [{"heading": "Today", "bullets": list(bullets)}]}
+
+
+class Grounding(unittest.TestCase):
+    """`evolve.ungrounded` finds names and numbers that the day's memories never say."""
+
+    def test_an_invented_name_and_time_are_found(self) -> None:
+        """Dr. Lee and 15:00 are in no memory; the first word of a bullet is not taken for a name."""
+        data = brief("Dr. Lee was mentioned in relation to the offsite agenda.", "Budget call with Anita at 3pm.")
+        self.assertEqual(evolve.ungrounded(data, DAY), ["15:00", "Lee"])
+
+    def test_grounded_facts_pass_in_any_form(self) -> None:
+        """2pm grounds 14:00, "three" grounds 3, a name matches in any case, and titles hold no names."""
+        data = brief("Anita approved the budget at 14:00.", "The Offsite has 3 workshops.", headline="End-of-Day Brief")
+        data["sections"][0]["heading"] = "Deadlines Tomorrow"
+        self.assertEqual(evolve.ungrounded(data, DAY), [])
+        self.assertEqual(evolve.ungrounded(brief(headline="Busy Day, 3 Workshops, Call at 16:00"), DAY), ["16:00"])
+
+
+class GeneralityGate(TempRuntime):
+    """`evolve.reflect` refuses a patch whose briefs invent facts on recent days. The model is mocked."""
+
+    def fake_model(self, patch: dict):
+        """Answer a reflection with `patch`, and a brief with Dr. Lee in it only if the prompt asks for him."""
+
+        def ask_json(user: list[dict], schema: dict, system: str | None = None) -> tuple[dict, dict]:
+            if schema is evolve.PATCH_SCHEMA:
+                return patch, {}
+            first = "Dr. Lee joins the offsite." if "Dr. Lee" in (system or "") else "The offsite has 3 workshops."
+            return brief(first, "Anita approved the budget at 14:00."), {}
+
+        return mock.patch.object(evolve.brain, "ask_json", side_effect=ask_json)
+
+    def reflect(self, rule: str) -> dict:
+        """Reflect on one complaint with a patch that adds `rule`, gated on two copies of DAY."""
+        patch = {"add_preferences": [rule], "remove_preferences": [], "style": None, "reason": "test"}
+        with self.fake_model(patch), mock.patch.object(evolve.events, "emit") as emit:
+            out = evolve.reflect([{"rating": -1, "text": "x"}], days=[DAY, DAY])
+        self.emitted = [c.args[0] for c in emit.call_args_list]
+        return out
+
+    def test_a_one_day_rule_is_refused(self) -> None:
+        """The rule makes every brief name Dr. Lee, whom the memories never mention: no new version."""
+        out = self.reflect("Always mention Dr. Lee in the first bullet.")
+        self.assertIsNone(out["version"])
+        self.assertEqual((out["invented"], out["gate_days"]), (["Lee"], 2))
+        self.assertIn("evolve.rejected", self.emitted)
+        self.assertEqual(evolve.get_version()["id"], 1)
+
+    def test_a_general_rule_passes(self) -> None:
+        """A rule that invents nothing becomes the active version."""
+        out = self.reflect("Write times in 24-hour format.")
+        self.assertEqual((out["version"], out["invented"], out["gate_days"]), (2, [], 2))
+        self.assertEqual(evolve.get_version()["preferences"], ["Write times in 24-hour format."])
+
+    def test_zero_gate_days_turns_the_gate_off(self) -> None:
+        """With EVOLVE_GATE_DAYS = 0 no brief is written and the one-day rule is kept, as before the gate."""
+        with mock.patch.object(config, "EVOLVE_GATE_DAYS", 0):
+            out = self.reflect("Always mention Dr. Lee in the first bullet.")
+        self.assertEqual((out["version"], out["gate_days"]), (2, 0))
+
+    def test_no_stored_day_means_nothing_to_check(self) -> None:
+        """With no brief in the database, the gate has no day to write for, and the patch is kept."""
+        patch = {"add_preferences": ["A rule."], "remove_preferences": [], "style": None, "reason": "test"}
+        with self.fake_model(patch), mock.patch.object(evolve.events, "emit"):
+            out = evolve.reflect([{"rating": -1, "text": "x"}])
+        self.assertEqual((out["version"], out["gate_days"]), (2, 0))
+
+    def test_recent_days_come_from_stored_briefs(self) -> None:
+        """The newest dated days with a brief, newest first; a day without a date or memories is skipped."""
+        for day in ("2026-11-09", "2026-11-10", "eval-d1", "2026-11-11"):
+            with self.fake_model({}), mock.patch.object(evolve.events, "emit"):
+                evolve.write_brief(DAY, day=day)
+        starts = []
+
+        def day_memories(start: float) -> list[str]:
+            starts.append(time.strftime("%Y-%m-%d", time.localtime(start)))
+            return [] if starts[-1] == "2026-11-10" else [starts[-1]]
+
+        with mock.patch.object(tasks, "day_memories", side_effect=day_memories):
+            self.assertEqual(evolve.recent_days(2), [["2026-11-11"], ["2026-11-09"]])
+        self.assertEqual(starts, ["2026-11-11", "2026-11-10", "2026-11-09"])
+
+
 class TimeWindow(unittest.TestCase):
     """Task 3 turns a time phrase into a search window."""
 

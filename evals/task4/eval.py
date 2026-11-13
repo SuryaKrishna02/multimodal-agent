@@ -21,6 +21,14 @@ Metrics:
     overfit_dev_gain      the one-day rule (headline starts with ..., first bullet names ...), on its day: after - before
     overfit_test_leak     share of test briefs that mention the one-day details after the overfit rounds
     overfit_test_change   test compliance after the overfit rounds - before
+    overfit_patches_refused  overfit patches that the generality gate refused (of 3)
+    gate_refused          patches of the normal rounds that the gate refused (also counted in patches_rejected)
+    invented_rate_before / invented_rate   share of test briefs where evolve.ungrounded() finds a name or number
+                          that the day's memories never say, with the seed prompt / after the last round
+    overfit_invented_rate the same, on the test briefs after the overfit rounds
+
+The generality gate of evolve.reflect() checks a new version on the dev days, the days that the simulated
+user saw (the eval has no stored briefs). It never sees a test day.
 """
 
 from pathlib import Path
@@ -54,14 +62,26 @@ def load_cases(cases_dir: Path):
     return items + ([{"op": "overfit", "folder": str(cases_dir)}] if overfit else [])
 
 
+def _gate_days(days: list[dict]) -> list[list[str]]:
+    """The memories of the dev days, for the generality gate of `evolve.reflect`."""
+    return [d["memories"] for d in days if d["split"] == "dev"]
+
+
+def _invented(results: dict, days: list[dict]) -> dict:
+    """Day id -> what `evolve.ungrounded` finds in that day's brief."""
+    memories = {d["id"]: d["memories"] for d in days}
+    return {d: evolve.ungrounded(r["brief"], memories[d]) for d, r in results.items()}
+
+
 def _round(item: dict, days: list[dict], prefs: list[dict]) -> dict:
     if item["n"] == 0:
         _state.clear()
-        _state["rejected"] = 0
+        _state.update(rejected=0, gate_refused=0)
         version = evolve.get_version()
     else:
-        r = evolve.reflect(simulate.complaints(_state["last"], prefs), source="simulated")
+        r = evolve.reflect(simulate.complaints(_state["last"], prefs), source="simulated", days=_gate_days(days))
         _state["rejected"] += bool(r["rejected"] and r["patch"])
+        _state["gate_refused"] += bool(r["invented"])
         version = evolve.get_version()
     results = simulate.evaluate(version, days, prefs)
     _state["last"] = results
@@ -76,8 +96,10 @@ def _round(item: dict, days: list[dict], prefs: list[dict]) -> dict:
         "checks": {d: r["checks"] for d, r in results.items()},
         "splits": {d: r["split"] for d, r in results.items()},
         "briefs": {d: evolve.to_markdown(r["brief"]) for d, r in results.items()},
+        "invented": _invented(results, days),
         "locked_broken": sum(bool(evolve.check_locked(evolve.render(v))) for v in evolve.versions()),
         "rejected": _state["rejected"],
+        "gate_refused": _state["gate_refused"],
     }
 
 
@@ -87,8 +109,10 @@ def _overfit(days: list[dict], prefs: list[dict], spec: dict) -> dict:
     day = [d for d in days if d["id"] == spec["day"]]
     test = [d for d in days if d["split"] == "test"]
     before = simulate.follows_rule(simulate.evaluate(evolve.get_version(), day, [])[spec["day"]]["brief"], spec)
+    refused = []
     for _ in range(3):
-        evolve.reflect([{"rating": -1, "text": t} for t in spec["feedback"]], source="simulated")
+        r = evolve.reflect([{"rating": -1, "text": t} for t in spec["feedback"]], "simulated", _gate_days(days))
+        refused += [r["invented"]] if r["invented"] else []
     v = evolve.get_version()
     after_day = simulate.evaluate(v, day, [])[spec["day"]]["brief"]
     after_test = simulate.evaluate(v, test, prefs)
@@ -104,6 +128,8 @@ def _overfit(days: list[dict], prefs: list[dict], spec: dict) -> dict:
         "test_days": len(after_test),
         "test": simulate.compliance(after_test, "test"),
         "briefs": {d: evolve.to_markdown(r["brief"]) for d, r in after_test.items()},
+        "invented": _invented(after_test, days),
+        "gate_refused": refused,
     }
 
 
@@ -145,6 +171,20 @@ def regression_rate(first: dict, last: dict) -> float:
     return round(sum(not last["checks"][d][p] for d, p in passed) / max(len(passed), 1), 3)
 
 
+def invented_rate(record: dict) -> float:
+    """Share of a record's test briefs in which `evolve.ungrounded` found something.
+
+    Args:
+        record (dict): A round record or the overfit record.
+
+    Returns:
+        float: Between 0 and 1, 0 when the record has no test brief.
+    """
+    found = record.get("invented", {})
+    test = [d for d in found if record.get("splits", {}).get(d, "test") == "test"]
+    return round(sum(bool(found[d]) for d in test) / max(len(test), 1), 3)
+
+
 def score(records):
     """Compute the metrics.
 
@@ -167,10 +207,15 @@ def score(records):
         "regression_rate": regression_rate(first, last),
         "locked_edits": max(r["locked_broken"] for r in rounds),
         "patches_rejected": last["rejected"],
+        "gate_refused": last.get("gate_refused", 0),
+        "invented_rate_before": invented_rate(first),
+        "invented_rate": invented_rate(last),
     }
     for r in records:
         if r["op"] == "overfit":
             out["overfit_dev_gain"] = int(r["day_follows_after"]) - int(r["day_follows_before"])
             out["overfit_test_leak"] = round(len(r["test_leaked_days"]) / max(r["test_days"], 1), 3)
             out["overfit_test_change"] = round(r["test"] - first["test"], 3)
+            out["overfit_patches_refused"] = len(r.get("gate_refused", []))
+            out["overfit_invented_rate"] = invented_rate(r)
     return out

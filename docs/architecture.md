@@ -221,7 +221,7 @@ flowchart TB
     stt["Speech to text: agent/senses/stt.py<br/>Whisper (accel hook) or Gemma"]
     cons["Consolidation: agent/memory/consolidate.py<br/>raw to summaries to facts, forget()"]
     mem["Memory: episodic.py<br/>levels, citations, image and audio vectors"]
-    evo["Self-evolution: agent/evolve.py<br/>locked blocks, versions, reflect(), rollback()"]
+    evo["Self-evolution: agent/evolve.py<br/>locked blocks, versions, reflect(),<br/>generality gate, rollback()"]
     dash["Dashboard<br/>Always on, Evolve, Tasks 3 and 4"]
     plat["agent/platforms/<br/>keep_awake, notify, autostart"]
 
@@ -231,7 +231,7 @@ flowchart TB
     listen --> stt --> mem
     jobs --> cons --> mem
     jobs --> evo
-    evo -- "brief from day_memories()" --> mem
+    evo -- "brief, and gate days, from day_memories()" --> mem
     beat --> ckpt
     dash -- "queue a job, read state" --> ckpt
     dash -- "feedback, rollback" --> evo
@@ -257,7 +257,7 @@ flowchart TB
 | `agent/senses/stt.py` | Speech to text for always-on listening: Whisper through the accelerator's `transcribe` hook, or Gemma 4. |
 | `agent/memory/consolidate.py` | Groups raw rows into 30-minute windows. One request per window writes claims and facts, and each one cites raw ids. Code drops invalid citations. `forget()` deletes covered raw rows after 7 days. `judge()` checks one claim against only the rows it cites. |
 | `agent/memory/episodic.py` | Adds a level (raw, summary, fact), `covered_by`, `superseded_by` and a second vector for the screenshot or the audio clip. `search()` takes a mode (text, media or both) and a time window. |
-| `agent/evolve.py` | The brief prompt: locked blocks in code, plus a style block and a preference list in versioned rows. `reflect()` asks for a patch, and `validate_patch()` refuses anything outside the editable parts. `rollback()` makes any version active. |
+| `agent/evolve.py` | The brief prompt: locked blocks in code, plus a style block and a preference list in versioned rows. `reflect()` asks for a patch, and `validate_patch()` refuses anything outside the editable parts. Then the generality gate writes briefs with the parent and the new version for a few recent days (`config.EVOLVE_GATE_DAYS`): if `ungrounded()` finds names or numbers in the new briefs that the memories never say and the parent did not write, the patch is refused (`evolve.rejected`). `rollback()` makes any version active. |
 | `agent/tasks.py` | Task 3, `recall()`: a time window from the question ("this morning"), a search, and an answer that cites memory ids. Task 4, `daily_brief()`: the day's summaries, facts, action items and screen episodes, written with the active prompt version. |
 | `dashboard/always_on.py` | The Session 2 endpoints. While the daemon runs, the dashboard queues jobs for it. Without a daemon, it runs them itself through the same handlers. |
 | `scripts/soak.py` | Runs a daemon for hours under load and records its memory and missed events. |

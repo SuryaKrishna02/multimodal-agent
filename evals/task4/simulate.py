@@ -195,6 +195,6 @@ def rounds_into_real_db(n: int) -> list[dict]:
         feedback = complaints(results, prefs)
         for f in feedback:
             evolve.add_feedback(None, f["rating"], f["text"], source="simulated")
-        r = evolve.reflect(source="simulated")
+        r = evolve.reflect(source="simulated", days=[d["memories"] for d in dev])
         out.append({"from": version["id"], "dev_compliance": compliance(results, "dev"), **r})
     return out

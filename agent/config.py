@@ -108,6 +108,10 @@ AUTOSTART_LABEL = "com.multimodal-agent.daemon"  # name of the login item that s
 
 # --- Self-evolution (Session 2) ----------------------------------------------
 EVOLVE_DB = RUNTIME / "evolve.sqlite"
+# Generality gate: before a new prompt version becomes active, it writes briefs for this many recent stored days
+# (and the parent version does too). 0 turns the gate off. Each day costs 2 brief requests per reflection.
+EVOLVE_GATE_DAYS = 3
+EVOLVE_GATE_MAX_INVENTED = 0  # distinct names or numbers the new version may invent over its parent on those days
 
 # --- Tools -------------------------------------------------------------------
 WORKSPACE = Path(os.environ.get("AGENT_WORKSPACE", ROOT / "data" / "workspace"))
