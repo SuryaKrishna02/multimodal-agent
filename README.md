@@ -48,7 +48,7 @@ agent/
   memory/consolidate.py  raw -> summaries -> facts with citations, forgetting (Session 2)
   daemon.py          the always-on process: schedule, triggers, job queue (Session 2)
   checkpoint.py      every job step as intent, execution, result in SQLite (Session 2)
-  evolve.py          versioned prompt patches with locked blocks and rollback (Session 2)
+  evolve.py          versioned prompt patches with locked blocks, a generality gate and rollback (Session 2)
   tasks.py           Task 1 (voice note), Task 2 (screen help), Task 3 (recall), Task 4 (daily brief)
   events.py          event log in SQLite, shared by the daemon, the dashboard and the CLI
   sql.py             opens every SQLite file and always closes it

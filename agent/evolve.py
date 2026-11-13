@@ -3,16 +3,19 @@
     prompt = LOCKED blocks (in this file, never stored, never patched)
            + the EDITABLE style block and preference list (stored in SQLite, one row per version)
 
-    brief -> feedback -> reflect -> patch -> new version        rollback = make an older version active
+    brief -> feedback -> reflect -> patch -> gate -> new version     rollback = make an older version active
 
 A version is never changed after it is written, so rolling back to any version is exact. A patch
 can only name the editable parts. `check_locked()` proves, on every version, that each locked
-block is byte-for-byte what this file says. The scope is prompts and memory only: the agent does
-not write code or tools, and it does not train weights.
+block is byte-for-byte what this file says. The gate is code, not an instruction: the new version
+writes briefs for a few recent days, and `ungrounded()` finds names and numbers in them that the
+day's memories never say. A patch that invents more than its parent did is refused. The scope is
+prompts and memory only: the agent does not write code or tools, and it does not train weights.
 """
 
 import difflib
 import json
+import re
 import sqlite3
 import time
 
@@ -263,9 +266,7 @@ def write_brief(memories: list[str], version: dict | None = None, day: str = "",
         dict: `data` (headline and sections), `markdown`, `version` and `brief_id` (None when not stored).
     """
     version = version or get_version()
-    user = "Today's memories:\n" + ("\n".join(f"- {m}" for m in memories) or "- (nothing recorded)")
-    data, _ = brain.ask_json([brain.part("text", user)], BRIEF_SCHEMA, system=render(version))
-    data = data or {"headline": "", "sections": []}
+    data = _compose(memories, version)
     brief_id = None
     if store:
         with _db() as db:
@@ -277,6 +278,13 @@ def write_brief(memories: list[str], version: dict | None = None, day: str = "",
     out = {"data": data, "markdown": to_markdown(data), "version": version["id"], "brief_id": brief_id}
     events.emit("evolve.brief", brief_id=brief_id, version=version["id"], day=day, markdown=out["markdown"])
     return out
+
+
+def _compose(memories: list[str], version: dict) -> dict:
+    """Ask the model for one brief with one version. Stores nothing and emits no brief event."""
+    user = "Today's memories:\n" + ("\n".join(f"- {m}" for m in memories) or "- (nothing recorded)")
+    data, _ = brain.ask_json([brain.part("text", user)], BRIEF_SCHEMA, system=render(version))
+    return data or {"headline": "", "sections": []}
 
 
 def to_markdown(data: dict) -> str:
@@ -345,20 +353,156 @@ def feedback_log(limit: int = 50) -> list[dict]:
         return [dict(zip(keys, r, strict=True)) for r in rows]
 
 
-def reflect(feedback: list[dict] | None = None, source: str = "reflect") -> dict:
-    """Read feedback, ask the model for a patch, validate it and write a new version.
+# --- Grounding and the generality gate --------------------------------------------------
+
+AM_PM = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s?([ap])\.?m\b\.?", re.I)  # 2pm, 3:30 p.m.
+CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\b")  # 14:30, 09:00
+NUMBER = re.compile(r"\d+")  # what is left after the times: 14th, 6, 8000
+NAME = re.compile(r"\b[A-Z][\w'’-]*")  # a capitalized word
+WORD = re.compile(r"[\w'’-]+")
+ONE_TO_TWELVE = "one two three four five six seven eight nine ten eleven twelve"
+NUMBER_WORDS = {w: str(i) for i, w in enumerate(ONE_TO_TWELVE.split(), 1)}  # "table for six" grounds "6"
+
+
+def _facts(text: str) -> tuple[set[str], set[str]]:
+    """Split a text into its numbers and its lower-case words.
+
+    A time becomes 24-hour "H:MM", so "2pm" and "14:00" are the same fact. "six" also counts as the number 6.
+    """
+    numbers: set[str] = set()
+
+    def keep(hour: int, minute: str | None) -> str:
+        numbers.add(f"{hour}:{minute or '00'}")
+        return " "
+
+    rest = AM_PM.sub(lambda m: keep(int(m[1]) % 12 + 12 * (m[3].lower() == "p"), m[2]), text)
+    rest = CLOCK.sub(lambda m: keep(int(m[1]), m[2]), rest)
+    numbers |= {str(int(n)) for n in NUMBER.findall(rest)}
+    words = {w.removesuffix("'s").removesuffix("’s") for w in WORD.findall(rest.lower())}
+    return numbers | {NUMBER_WORDS[w] for w in words if w in NUMBER_WORDS}, words
+
+
+def ungrounded(data: dict, memories: list[str]) -> list[str]:
+    """Find the names and numbers in a brief that none of the day's memories say.
+
+    The rule is simple on purpose, so you can predict it:
+
+    - A name is a capitalized word in a bullet, except the first word (a first word is capitalized anyway).
+      It is grounded if the memories have the same word in any case.
+    - A number or a time, in a bullet or the headline, is grounded if the memories have it. Times compare in
+      24-hour form, so "2pm" in a memory grounds "14:00".
+    - The headline and the headings are titles, often in title case ("End-of-Day Brief", "Deadlines"), so
+      their capitalized words are not taken for names.
+
+    Args:
+        data (dict): The brief (`headline`, `sections`).
+        memories (list[str]): The memories the brief was written from.
+
+    Returns:
+        list[str]: The invented names (as written) and numbers ("H:MM" for a time), sorted. Empty means grounded.
+    """
+    mem_numbers, mem_words = _facts("\n".join(memories))
+    bullets = [b for s in data.get("sections", []) for b in s.get("bullets", [])]
+    out = _facts(data.get("headline", ""))[0] - mem_numbers
+    for line in bullets:
+        out |= _facts(line)[0] - mem_numbers
+        after_first = line.split(maxsplit=1)[1:]
+        names = {n.removesuffix("'s").removesuffix("’s") for n in NAME.findall(" ".join(after_first))}
+        out |= {n for n in names if len(n) > 1 and n.lower() not in mem_words}
+    return sorted(out)
+
+
+def recent_days(n: int) -> list[list[str]]:
+    """Return the memories of the newest days that have a stored brief, newest first.
+
+    Args:
+        n (int): How many days at most.
+
+    Returns:
+        list[list[str]]: One list of memory lines per day. Days without a date or without memories are skipped.
+    """
+    from agent import tasks  # tasks imports this module
+
+    with _db() as db:
+        days = [r[0] for r in db.execute("SELECT day FROM briefs WHERE day != '' GROUP BY day ORDER BY MAX(id) DESC")]
+    out = []
+    for day in days:
+        if len(out) == n:
+            break
+        try:
+            start = time.mktime(time.strptime(day, "%Y-%m-%d"))
+        except ValueError:
+            continue
+        if mems := tasks.day_memories(start):
+            out.append(mems)
+    return out
+
+
+class Ungrounded(PatchRejected):
+    """The generality gate refused a version: its briefs invent names or numbers that the memories never say."""
+
+    def __init__(self, invented: list[str], days: int) -> None:
+        """Keep the invented words for the event and the eval.
+
+        Args:
+            invented (list[str]): What the new version invented that its parent did not.
+            days (int): How many days the gate checked.
+        """
+        self.invented, self.days = invented, days
+        super().__init__(
+            f"on {days} recent days the new version wrote what the memories never say: {', '.join(invented)}. "
+            "A rule about one day does not hold on every day."
+        )
+
+
+def invented_by(base: dict, new: dict, days: list[list[str]]) -> list[str]:
+    """Write a brief with the parent and with the new version for each day, and compare what they invent.
+
+    Args:
+        base (dict): The parent version.
+        new (dict): The new `style` and `preferences`.
+        days (list[list[str]]): The memories of each day.
+
+    Returns:
+        list[str]: Names and numbers that the new version invents on some day where the parent does not, sorted.
+    """
+    out: set[str] = set()
+    for mems in days:
+        before = set(ungrounded(_compose(mems, base), mems))
+        out |= set(ungrounded(_compose(mems, new), mems)) - before
+    return sorted(out)
+
+
+def _gate(base: dict, new: dict, days: list[list[str]] | None) -> list[list[str]]:
+    """Refuse a new version that invents names or numbers on recent days. Returns the days it checked."""
+    n = config.EVOLVE_GATE_DAYS  # 0 turns the gate off
+    days = [] if n == 0 else recent_days(n) if days is None else days[:n]
+    invented = invented_by(base, new, days)
+    if len(invented) > config.EVOLVE_GATE_MAX_INVENTED:
+        raise Ungrounded(invented, len(days))
+    return days
+
+
+def reflect(feedback: list[dict] | None = None, source: str = "reflect", days: list[list[str]] | None = None) -> dict:
+    """Read feedback, ask the model for a patch, validate it, gate it and write a new version.
+
+    The gate writes briefs with the parent and the new version for a few days (`config.EVOLVE_GATE_DAYS`), and
+    refuses the patch if the new briefs invent names or numbers that the parent's briefs did not.
 
     Args:
         feedback (list[dict], optional): Feedback rows with `rating` and `text`. Defaults to `unused_feedback()`.
         source (str, optional): Label of the new version. Defaults to "reflect".
+        days (list[list[str]], optional): The memories of the days the gate checks. Defaults to `recent_days()`.
 
     Returns:
-        dict: `version` (new id, or None when nothing changed or the patch was refused), `patch`, `rejected`.
+        dict: `version` (new id, or None when nothing changed or the patch was refused), `patch`, `rejected`,
+        `invented` (what the gate found, empty when it passed) and `gate_days` (how many days it checked).
     """
     feedback = unused_feedback() if feedback is None else feedback
     base = get_version()
+    out = {"version": None, "patch": None, "rejected": None, "invented": [], "gate_days": 0}
     if not feedback:
-        return {"version": None, "patch": None, "rejected": "no feedback to reflect on"}
+        return {**out, "rejected": "no feedback to reflect on"}
     # A bare "(bad) Start with X" reads as "do not start with X": say who said what. See docs/VERIFICATION.md.
     lines = "\n".join(
         f'- The user rated a brief {"good" if f["rating"] > 0 else "bad"} and said: "{f["text"]}"' for f in feedback
@@ -367,17 +511,22 @@ def reflect(feedback: list[dict] | None = None, source: str = "reflect") -> dict
     prompt = REFLECT_PROMPT.format(style=base["style"], prefs=prefs, feedback=lines)
     patch, _ = brain.ask_json([brain.part("text", prompt)], PATCH_SCHEMA)
     if patch is None:
-        return {"version": None, "patch": None, "rejected": "no valid patch"}
+        return {**out, "rejected": "no valid patch"}
+    out["patch"] = patch
     try:
         new = validate_patch(base, patch)
+        if new == {"style": base["style"], "preferences": base["preferences"]}:
+            return {**out, "rejected": "patch changes nothing"}
+        out["gate_days"] = len(_gate(base, new, days))
+    except Ungrounded as e:
+        events.emit("evolve.rejected", reason=str(e), patch=patch, invented=e.invented, gate_days=e.days)
+        return {**out, "rejected": str(e), "invented": e.invented, "gate_days": e.days}
     except PatchRejected as e:
         events.emit("evolve.rejected", reason=str(e), patch=patch)
-        return {"version": None, "patch": patch, "rejected": str(e)}
-    if new == {"style": base["style"], "preferences": base["preferences"]}:
-        return {"version": None, "patch": patch, "rejected": "patch changes nothing"}
-    vid = new_version(base, new["style"], new["preferences"], patch.get("reason", ""), source)
-    _mark_used([f["id"] for f in feedback if "id" in f], vid)
-    return {"version": vid, "patch": patch, "rejected": None}
+        return {**out, "rejected": str(e)}
+    out["version"] = new_version(base, new["style"], new["preferences"], patch.get("reason", ""), source)
+    _mark_used([f["id"] for f in feedback if "id" in f], out["version"])
+    return out
 
 
 def _mark_used(ids: list[int], version_id: int) -> None:

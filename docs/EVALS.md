@@ -112,12 +112,32 @@ first bullet".
 
 Then the eval checks two things. Does that day follow the rule (`overfit_dev_gain`)? Do the test days, which have no
 dentist, now mention one (`overfit_test_leak`)? The reflection prompt asks for rules "that hold on every day". The
-result shows whether that instruction is enough. In the E4B runs so far it is not: `overfit_test_leak` was 1.0, so
-every held-out brief mentioned the dentist after the overfit rounds. One test brief said "Dr. Lee was mentioned in
-relation to the offsite agenda", but that day's memories never name Dr. Lee. To obey a learned rule, the model invented
-a fact, even though the locked identity block says "Never invent an event, a name, a time or a task". This is why the
-eval keeps held-out days, and why a prompt that learns from feedback needs a check that code runs, not only an
-instruction.
+result shows whether that instruction is enough. It is not. With the gate off (below), `overfit_test_leak` was 1.0 on
+E4B and E2B: every held-out brief mentioned the dentist after the overfit rounds. One test brief said "Dr. Lee was
+mentioned in relation to the offsite agenda", but that day's memories never name Dr. Lee. To obey a learned rule, the
+model invented a fact, even though the locked identity block says "Never invent an event, a name, a time or a task".
+This is why the eval keeps held-out days, and why a prompt that learns from feedback needs a check that code runs, not
+only an instruction.
+
+**The generality gate is the check that code runs.** Before a new version becomes active, `evolve.reflect()` writes
+briefs with the parent and the new version for a few recent days (`config.EVOLVE_GATE_DAYS`). `evolve.ungrounded()`
+lists the names and numbers in a brief that none of that day's memories say:
+
+- a name is a capitalized word in a bullet, not its first word, that no memory has in any case;
+- a number or time in a bullet or the headline that no memory has (times compare in 24-hour form, so "2pm" grounds
+  "14:00", and "six" grounds "6");
+- the headline and headings are titles, so their capitalized words are not taken for names.
+
+If the new version invents something that the parent did not (more than `config.EVOLVE_GATE_MAX_INVENTED`), the patch
+is refused and `evolve.rejected` names the words. In the daemon the days come from the `briefs` table and
+`tasks.day_memories()`. In the eval they are the dev days, the days that the simulated user saw, never a test day.
+`overfit_patches_refused` counts refused overfit patches, `gate_refused` counts refusals in the normal rounds (a false
+alarm costs a round), and `invented_rate` is the share of test briefs where the check finds something.
+
+The check is a heuristic, and it misses things. A lower-case word ("the dentist") is not a name to it, and a headline
+that starts with "Dentist" passes, because headline words are not read as names (E2B wrote "Dentist Summary" on a
+day with no dentist, and the check found nothing in that brief). It catches the invented person, which is the harm,
+and one such day is enough to refuse the patch. Read the refused words in the event log.
 
 **The soak test runs beforehand.** `python scripts/soak.py --hours 3` runs its own daemon on a throwaway runtime folder
 and queues a replay of the synthetic conversation every 5 minutes. The `daemon` eval reads the newest file in
