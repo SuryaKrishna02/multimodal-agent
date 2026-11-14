@@ -86,6 +86,10 @@ Under each reply, "Recalled N memories" opens the memories that search put into 
 "Inspect in Brain" opens that turn in the Brain tab: the context budget, the exact request and the reply. A daily
 brief (from the daemon at 18:00, or from the Tasks tab) also arrives in the chat, with buttons for your feedback.
 
+The Brain tab shows only what you sent from the dashboard. Its Show menu adds the requests of the command line, the
+evals and the daemon, which write to the same event log. The Evolve tab lists each prompt patch that the validator or
+the generality gate refused, with the reason.
+
 The conversation is saved in `data/runtime/chat.json`, so it survives a restart of the dashboard. Clear chat empties it
 and deletes its pictures. Long-term memories stay.
 

@@ -124,6 +124,7 @@ const TAB_REFRESH = {};   // tab name -> function that reloads it when shown (al
 const TABS = $$("#tabs button");
 function showTab(name) {
   if (!$("#panel-" + name)) name = "serving";
+  if (!$("#panel-" + name).classList.contains("active")) window.scrollTo(0, 0);   // a new tab starts at its top
   $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
   TABS.forEach((b) => {
     const on = b.dataset.tab === name;
@@ -452,20 +453,26 @@ function drawTimeline(e) {
 }
 
 // --- Brain: one message at a time, as a list of steps ---------------------------------
-// A turn runs from the first event of a message to the reply that ends it.
-function groupTurns() {
+// A turn runs from the first event of a message to the reply that ends it. One process writes one turn.
+// Before the first model call the events come in this order. An event that goes back in the order starts another
+// message: evals and tests write to the same log, and some of their events never reach a model call.
+const TURN_ORDER = ["hotkey.pressed", "senses", "memory.search", "brain.budget", "brain.request"];
+const turnRank = (kind) => TURN_ORDER.findIndex((k) => kind === k || kind.startsWith(k + "."));
+function groupTurns(source = brainView.source) {
   const turns = [];
-  let cur = null, finished = false;
-  const startsTurn = /^(hotkey\.pressed|senses\.(screen|audio|video)|memory\.search|brain\.budget)$/;
+  let cur = null, finished = false, rank = -1;
   for (const e of allEvents) {
     if (!BRAIN_KINDS.test(e.kind)) continue;
-    const strayedSearch = e.kind === "memory.search" && cur && !cur.some((x) => x.kind === "brain.request");
-    if (!cur || strayedSearch || (finished && startsTurn.test(e.kind))) { cur = []; turns.push(cur); finished = false; }
+    const r = turnRank(e.kind);
+    const called = !!cur && cur.some((x) => x.kind === "brain.request");
+    const goesBack = r >= 0 && !called && (r < rank || (r === rank && r >= 2));
+    if (!cur || e.source !== cur[0].source || goesBack || (finished && r >= 0)) { cur = []; turns.push(cur); finished = false; rank = -1; }
     cur.push(e);
+    if (r >= 0 && !called) rank = r;
     if (e.kind === "brain.reply") finished = !asked(e.message).length;
     if (e.kind === "brain.invalid_json") finished = false;
   }
-  return turns.filter((t) => t.some((e) => e.kind === "brain.request"));
+  return turns.filter((t) => t.some((e) => e.kind === "brain.request") && (source === "all" || t[0].source === source));
 }
 
 // Each model call pairs a request with the reply that follows it.
@@ -478,7 +485,11 @@ function modelCalls(turn) {
   return calls;
 }
 
-const brainView = { turn: null, call: null };   // null follows the newest; a number stays where the presenter stepped to
+// turn and call: null follows the newest; a number stays where the presenter stepped to.
+// source: "dashboard" shows what you sent from this page; "all" adds the command line, the evals and the daemon.
+const brainView = { turn: null, call: null, source: "dashboard", more: false };
+const TURN_SOURCES = { dashboard: "Sent from this dashboard", cli: "From the command line or an eval", daemon: "From a daemon job" };
+const STEPS_SHOWN = 10;   // a longer list hides the rest behind "Show more"
 function turnTitle(turn) {
   const req = turn.find((e) => e.kind === "brain.request");
   const user = req.body.messages.filter((m) => m.role === "user").pop();
@@ -501,7 +512,12 @@ const stepLine = (e) => {
 };
 
 function renderBrain() {
-  const turns = groupTurns();
+  let turns = groupTurns();
+  if (!turns.length && brainView.source !== "all" && groupTurns("all").length) {   // nothing from here yet: show the rest
+    brainView.source = "all";
+    turns = groupTurns();
+  }
+  $("#turn-source").value = brainView.source;
   $("#brain-empty").hidden = turns.length > 0;
   $("#brain-body").hidden = !turns.length;
   if (!turns.length) return;
@@ -511,11 +527,12 @@ function renderBrain() {
   $("#turn-prev").disabled = index === 0;
   $("#turn-next").disabled = index === turns.length - 1;
   $("#turn-title").textContent = turnTitle(turn);
+  $("#turn-from").textContent = TURN_SOURCES[turn[0].source] || turn[0].source || "";
 
   const calls = modelCalls(turn);
   const callIndex = brainView.call === null ? calls.length - 1 : Math.min(brainView.call, calls.length - 1);
   let n = -1;
-  $("#turn-steps").innerHTML = turn.filter((e) => e.kind !== "brain.reply").map((e) => {
+  const lines = turn.filter((e) => e.kind !== "brain.reply").map((e) => {
     if (e.kind === "brain.request") {
       n += 1;
       const reply = calls[n].reply;
@@ -526,7 +543,10 @@ function renderBrain() {
     }
     const line = stepLine(e);
     return `<li><span class="step-tab">${esc(line.tab)}</span><div class="step-body">${line.html}</div></li>`;
-  }).join("");
+  });
+  const extra = lines.length - STEPS_SHOWN;
+  $("#turn-steps").innerHTML = extra < 3 ? lines.join("") : lines.slice(0, STEPS_SHOWN).join("")
+    + `<li class="more-steps"><details${brainView.more ? " open" : ""}><summary>${extra} more steps</summary><ol class="steps">${lines.slice(STEPS_SHOWN).join("")}</ol></details></li>`;
 
   renderBudget(turn.find((e) => e.kind === "brain.budget"), calls[0]?.reply);
   const call = calls[callIndex];
@@ -534,18 +554,21 @@ function renderBrain() {
   renderRequest(call.request.body);
   renderReply(call.reply);
 }
-$("#turn-prev").onclick = () => { const t = groupTurns().length; brainView.turn = Math.max(0, (brainView.turn ?? t - 1) - 1); brainView.call = null; renderBrain(); };
+$("#turn-prev").onclick = () => { const t = groupTurns().length; brainView.turn = Math.max(0, (brainView.turn ?? t - 1) - 1); brainView.call = null; brainView.more = false; renderBrain(); };
 $("#turn-next").onclick = () => {
   const t = groupTurns().length;
   const next = (brainView.turn ?? t - 1) + 1;
   brainView.turn = next >= t - 1 ? null : next;   // back on the newest: follow new messages again
   brainView.call = null;
+  brainView.more = false;
   renderBrain();
 };
 $("#turn-steps").onclick = (e) => {
   const b = e.target.closest("[data-call]");
   if (b) { brainView.call = Number(b.dataset.call); renderBrain(); }
 };
+$("#turn-steps").addEventListener("toggle", (e) => { if (e.target.matches(".more-steps details")) brainView.more = e.target.open; }, true);
+$("#turn-source").onchange = (e) => { Object.assign(brainView, { source: e.target.value, turn: null, call: null, more: false }); renderBrain(); };
 
 const BUDGET_PARTS = [
   ["system+memories", "System prompt and memories", "--s1", false],
@@ -729,7 +752,7 @@ async function sendChat(text, voice = null) {
   if (out.images?.length) sent.querySelector(".msg-pics")?.replaceWith(Object.assign(document.createElement("div"),
     { className: "msg-pics", innerHTML: out.images.map((p) => zoomable(p, "Picture sent with the message")).join("") }));
   await pollEvents();   // so the Brain tab has this turn, and Inspect can open it
-  reply.innerHTML = agentHtml(out.text, { tool_calls: out.tool_calls, memories: out.memories, seconds: out.seconds, tokens: out.tokens?.total }, groupTurns().length - 1);
+  reply.innerHTML = agentHtml(out.text, { tool_calls: out.tool_calls, memories: out.memories, seconds: out.seconds, tokens: out.tokens?.total }, groupTurns("dashboard").length - 1);
   $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
 }
 $("#chat-form").onsubmit = (e) => { e.preventDefault(); sendChat(input.value.trim()); };
@@ -759,8 +782,7 @@ $("#chat-voice").onclick = async () => {
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-inspect]");
   if (!b) return;
-  brainView.turn = Number(b.dataset.inspect);
-  brainView.call = null;
+  Object.assign(brainView, { source: "dashboard", turn: Number(b.dataset.inspect), call: null, more: false });
   showTab("brain");
 });
 
@@ -1122,13 +1144,13 @@ function renderScoreSummary(rows) {
     for (const [src, n] of Object.entries(cell?.sources || {})) sourceTotals[src] = (sourceTotals[src] || 0) + n;
   }
   const whens = all.map((c) => c.when).filter(Boolean).sort();
-  const state = fail ? `<div class="hero-state bad">✗ ${fail} failing</div>` : judged.length ? '<div class="hero-state ok">✓ All targets met</div>' : "";
+  const failing = [...new Set(rows.filter((r) => cellsOf(r).some((c) => c.pass === false)).map((r) => (COMPONENTS[r.component] || [r.component])[0]))];
+  const state = fail ? `<div class="hero-state bad">✗ ${fail} failing, in ${esc(failing.join(", "))}. Its row is open below.</div>` : judged.length ? '<div class="hero-state ok">✓ All targets met</div>' : "";
   const src = Object.entries(sourceTotals).map(([s, n]) => `${num(n)} ${s}`).join(" + ") || "None yet";
   $("#score-summary").innerHTML = `<div class="score-top"><div><div class="hero">${pass}<small> of ${judged.length}</small></div>
       <div class="hero-label">target checks passed, counting each metric on each model</div>${state}</div>
     <div class="tiles">${tiles([
       [components.length - notRun, `of ${components.length}`, notRun ? `Components run, ${notRun} not run yet` : "Components run"],
-      [all.length - judged.length, "", "Extra measurements with no target"],
       [src, "", "Test cases"],
       [whens.length ? fmtWhen(whens[whens.length - 1]) : "–", "", "Latest run"],
     ])}</div></div>
@@ -1197,6 +1219,7 @@ const runLive = (component, button) => {
 };
 
 showTab(location.hash.slice(1) || "serving");
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));   // a link such as #evolve opens that tab
 setInterval(pollEvents, 700);
 setInterval(refreshState, 2000);
 pollEvents();

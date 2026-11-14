@@ -127,12 +127,26 @@ $("#daemon-jobs").addEventListener("toggle", async (e) => {
     return `<span class="ph">${esc(n)}</span>${cell("intent")}${cell("execution")}${cell("result")}<span class="muted">${esc(res ? short(JSON.stringify(res.data), 120) : "not finished")}</span>`;
   }).join("")}</div><p class="hint">×2 means the step started twice: it was running when the process died.</p>` : '<p class="hint">No steps recorded yet.</p>';
 }, true);
+// The result of a job in plain words. A job kind that is not listed here shows its raw fields.
+const JOB_RESULT = {
+  consolidate: (r) => r.windows ? `Summarized ${plural(r.windows, "window")} of raw rows and stored ${plural(r.facts, "fact")}` : "Nothing was ready for a summary",
+  brief: (r) => `Brief #${r.brief_id} with prompt v${r.version}${r.headline ? `: ${r.headline}` : ""}`,
+  reflect: (r) => r.version ? `New prompt version v${r.version}` : `No new version: ${r.rejected}`,
+  forget: (r) => `Deleted ${plural(r.deleted, "raw row")} that a summary covers`,
+  prune_events: (r) => `Deleted ${plural(r.deleted, "old event")}`,
+  replay: (r) => `Heard ${plural(r.utterances, "utterance")}`,
+};
+function jobResult(e) {
+  if (e.summary?.error) return e.summary.error;
+  try { if (JOB_RESULT[e.job]) return JOB_RESULT[e.job](e.summary); } catch { /* an older shape: show the raw fields */ }
+  return short(JSON.stringify(e.summary), 200);
+}
 const FEED_KINDS = new Set(["daemon.action", "daemon.missed", "checkpoint.recovered", "daemon.started", "daemon.killed", "memory.forgotten"]);
 function renderFeed() {
   // Only what the daemon did, or a job you started here: eval runs write to the same log from the CLI.
   const rows = allEvents.filter((e) => FEED_KINDS.has(e.kind) && (e.source === "daemon" || e.source === "dashboard")).slice(-30).reverse();
   $("#daemon-feed").innerHTML = rows.map((e) => `<div class="feed-row"><time>${clock(e.ts)}</time><div><div>${esc(describe(e))}</div>
-    ${e.summary ? `<div class="why">${esc(short(JSON.stringify(e.summary), 200))}</div>` : ""}</div>
+    ${e.summary ? `<div class="why">${esc(jobResult(e))}</div>` : ""}</div>
     <span class="tag ${e.status === "failed" || e.kind === "daemon.killed" ? "bad" : e.kind === "daemon.missed" ? "warn" : "plain"}">${esc(e.source || "")}</span></div>`).join("")
     || '<div class="none">Nothing yet. Start the daemon, or press Summarize now in the Memory tab.</div>';
 }
@@ -209,6 +223,15 @@ async function refreshEvolve() {
   $("#evolve-feedback").innerHTML = s.feedback.map((f) => `<div class="feed-row"><time>${clock(f.ts)}</time><div>${f.rating > 0 ? "👍" : "👎"} ${esc(f.text)}
     <div class="why">${f.brief_id ? `brief #${f.brief_id} · ` : ""}${f.used_in ? `used in v${f.used_in}` : "not used yet"}</div></div><span class="tag ${f.source === "user" ? "safe" : "plain"}">${esc(f.source)}</span></div>`).join("")
     || '<div class="none">No feedback yet. Write a brief in the Tasks tab and tell it what to change.</div>';
+  renderRefused();
+}
+// Only what a reflection here or in the daemon refused: the Task 4 eval writes refusals to the same log.
+function renderRefused() {
+  const rows = allEvents.filter((e) => e.kind === "evolve.rejected" && e.source !== "cli").slice(-10).reverse();
+  $("#evolve-refused").innerHTML = rows.map((e) => `<div class="feed-row"><time>${clock(e.ts)}</time><div>${esc(e.reason)}
+    <div class="why">${e.patch?.reason ? `The patch wanted: ${esc(e.patch.reason)}` : ""}</div></div>
+    <span class="tag ${e.invented ? "warn" : "plain"}">${e.invented ? "gate" : "validator"}</span></div>`).join("")
+    || '<div class="none">None yet.</div>';
 }
 $("#evolve-versions").onclick = async (e) => {
   const d = e.target.dataset;
@@ -218,8 +241,9 @@ $("#evolve-versions").onclick = async (e) => {
 async function reflectNow(button, out) {
   const r = await busy(button, () => api("/api/evolve/reflect", {}), out ? { out, text: "Reading your feedback and patching the prompt…" } : {});
   if (!r) return;
-  const html = r.version ? `<div class="callout ok"><h4>New version v${r.version}</h4><p>${esc(r.patch.reason)}</p></div>${diffHtml(r.diff)}`
-    : `<div class="callout warn"><h4>No new version</h4><p>${esc(r.rejected)}</p></div>`;
+  const gate = r.gate_days ? `The gate wrote briefs for ${plural(r.gate_days, "recent day")} and found no invented name or number.` : "The gate had no stored day to check.";
+  const html = r.version ? `<div class="callout ok"><h4>New version v${r.version}</h4><p>${esc(r.patch.reason)}</p><p>${gate}</p></div>${diffHtml(r.diff)}`
+    : `<div class="callout warn"><h4>${r.invented?.length ? "The gate refused the patch" : "No new version"}</h4><p>${esc(r.rejected)}</p></div>`;
   if (out) $(out).innerHTML = html;
   refreshEvolve();
   if (r.version) showDiff(evolveParent(r), r.version);

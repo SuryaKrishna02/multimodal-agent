@@ -337,6 +337,10 @@ button.step-body:hover { border-color: var(--accent); background: var(--card); }
 button.step-body.selected { border-color: var(--accent); background: var(--accent-soft); }
 .step-body small { display: block; font-size: 13px; color: var(--muted); }
 .step-bad { color: var(--bad); }
+.turn-from { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; margin: -6px 0 12px; }
+.more-steps summary { cursor: pointer; padding: 5px 10px; font-size: 14px; font-weight: 550; color: var(--accent); }
+.steps li.more-steps { grid-template-columns: minmax(0, 1fr); }
+.more-steps .steps { margin-top: 4px; }
 
 /* Brain: context budget */
 .budget-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; }

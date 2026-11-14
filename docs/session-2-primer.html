@@ -587,6 +587,17 @@ ol.blocks li { grid-template-columns: 300px 1fr; }
 #w-win .sim-controls input[type="range"] { width: 320px; }
 #w-win .win-list .w { font-size: 24px; }
 
+/* One day with the agent, and the four rules: larger text, because these slides have few words */
+#s-day .flow { min-height: 430px; }
+#s-day .flow .chip b { font-size: 32px; }
+#s-day .flow .chip code { font-size: 22px; }
+#s-day .flow .chip span { font-size: 26px; }
+#s-rules .cards.two { gap: 36px; flex: 1; align-content: stretch; }
+#s-rules .card { padding: 34px 38px; }
+#s-rules .card > b { font-size: 40px; }
+#s-rules .card > code { font-size: 25px; }
+#s-rules .card > span { font-size: 31px; }
+
 </style>
 </head>
 <body>
@@ -602,7 +613,7 @@ ol.blocks li { grid-template-columns: 300px 1fr; }
 </section>
 
 <section class="slide" data-type="divider" data-title="Section: Recap">
-  <p class="eyebrow">multimodal-agent</p>
+  <p class="eyebrow">Multimodal Personal Agent</p>
   <h2>Recap of Part 1</h2>
   <p>Part 1 built the core loop: the agent hears a note or sees the screen, and answers in text.</p>
 </section>
@@ -659,10 +670,10 @@ ol.blocks li { grid-template-columns: 300px 1fr; }
   </div>
 </section>
 
-<section class="slide" data-type="divider" data-title="Section: Part 2">
-  <p class="eyebrow">multimodal-agent</p>
-  <h2>Always on and learning</h2>
-  <p>Now the agent runs as its own process all day, and it improves from your feedback.</p>
+<section class="slide" data-type="title" data-title="Section: Part 2">
+  <p class="eyebrow">Multimodal Personal Agent</p>
+  <h1 class="paper-title">Always on and learning</h1>
+  <p class="series">Now the agent runs as its own process all day, and it improves from your feedback.</p>
 </section>
 
 <section class="slide" data-type="content" data-part="start" data-title="The goal" id="s-goal" data-part-label="Start">
@@ -676,6 +687,28 @@ ol.blocks li { grid-template-columns: 300px 1fr; }
     <li class="card"><b>Learns from feedback</b><code>agent/evolve.py</code><span>It changes its own brief prompt. The locked blocks never change.</span></li>
     <li class="card"><b>Two new tasks</b><code>agent/tasks.py</code><span>Task 3 answers questions about earlier events. Task 4 writes a daily brief.</span></li>
   </ul>
+</section>
+
+<section class="slide" data-type="content" data-part="start" data-title="One day with the agent" id="s-day">
+  <h2>One day with the agent: what runs, and when</h2>
+  <div class="flow day-flow">
+    <div class="chip"><b>09:00 Hear</b><code>ambient.py</code><span>You talk about the offsite. Each sentence becomes one raw transcript row.</span></div>
+    <div class="to">&#8594;</div>
+    <div class="chip"><b>09:30 Summarize</b><code>consolidate.py</code><span>The schedule runs every 15 minutes. The 11 rows become claims and facts.</span></div>
+    <div class="to">&#8594;</div>
+    <div class="chip"><b>14:00 Ask</b><code>tasks.py</code><span>Task 3: &ldquo;What did we decide this morning?&rdquo; The answer cites its memories.</span></div>
+    <div class="to">&#8594;</div>
+    <div class="chip"><b>18:00 Brief</b><code>tasks.py</code><span>Task 4: the schedule writes the daily brief and shows a notification.</span></div>
+    <div class="to">&#8594;</div>
+    <div class="chip"><b>18:05 Teach</b><code>evolve.py</code><span>You say &ldquo;Too long&rdquo;. A reflection writes version 2 of the brief prompt.</span></div>
+    <div class="to">&#8594;</div>
+    <div class="chip end"><b>03:00 Forget</b><code>consolidate.py</code><span>Raw rows that a summary covers are deleted after 7 days.</span></div>
+  </div>
+  <ul class="cards two">
+    <li class="card"><b>At any time: a crash</b><code>agent/checkpoint.py</code><span>Kill the daemon in the middle of a job. The next start continues after the last finished step.</span></li>
+    <li class="card"><b>All day: the dashboard</b><code>dashboard/</code><span>It is a second process that reads the same files. The feed shows each job and its reason.</span></li>
+  </ul>
+  <p class="goal">Only three steps need you: the question, the feedback and the reflection.</p>
 </section>
 
 <section class="slide" data-type="content" data-part="start" data-title="The map">
@@ -701,7 +734,7 @@ elif j:
     checkpoint.finish(j["id"], "failed", f"unknown job kind '{j['kind']}'")</pre></div><div class="code-wrap"><div class="code-file">agent/daemon.py  Daemon.run_job()</div><pre class="code" data-blocks='[[317, 319, 3]]' data-src="agent/daemon.py:317-319">events.emit("daemon.action", job_id=j["id"], job=j["kind"], reason=j["reason"], status=status, summary=summary)
 if status == "done" and j["kind"] in config.NOTIFY_JOBS:
     self._notify(j["kind"], summary)</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Schedule</b><span class="txt"><code>due()</code> turns each due slot of <code>config.SCHEDULE</code> into a queued job with a reason.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Triggers</b><span class="txt">20 new transcripts queue a summary early. The listener follows your switch.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One job</b><span class="txt">The oldest queued job runs, from the schedule or from the dashboard.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>The feed</b><span class="txt">Each finished job goes to the feed with its reason. A brief also shows a notification.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Two requests upgraded one database at the same time, and one failed. Now <code>agent/sql.py</code> changes tables under a lock. Make shared schema changes safe to run twice.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd><code>scripts/soak.py</code>, 8 minutes, a replay every 120 s.</dd><dt>Output</dt><dd>Missed slots, heartbeats, memory.</dd><dt>Metrics</dt><dd>0 missed slots, peak 520 MB. Growth per hour: not measured yet.</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Schedule</b><span class="txt"><code>due()</code> turns each due slot of <code>config.SCHEDULE</code> into a queued job with a reason.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Triggers</b><span class="txt">20 new transcripts queue a summary early. The listener follows your switch.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One job</b><span class="txt">The oldest queued job runs, from the schedule or from the dashboard.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>The feed</b><span class="txt">Each finished job goes to the feed with its reason. A brief also shows a notification.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Two requests upgraded one database at the same time, and one failed. Now <code>agent/sql.py</code> changes tables under a lock. Make shared schema changes safe to run twice.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd><code>scripts/soak.py</code>. The Mac slept: 0.23 h awake.</dd><dt>Output</dt><dd>Missed slots, heartbeats, memory.</dd><dt>Metrics</dt><dd>0 missed slots while awake. Growth per hour: too few samples.</dd></dl></li></ol>
   </div>
 </section>
 
@@ -804,7 +837,7 @@ mem_id = episodic.store(text, kind="transcript", meta=meta, ts=u["start_ts"], me
   <h2>Memory: a window of raw rows becomes claims</h2>
   <p class="rel"><b>Called by</b> <code>consolidate()</code>, one step per window <b>Calls</b> <code>brain.ask_json()</code>, <code>_cited()</code></p>
   <div class="walk" style="grid-template-columns:1.6fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py  summarize_window()</div><pre class="code" data-blocks='[[142, 146, 0], [151, 153, 1], [154, 156, 2], [166, 171, 3]]' data-src="agent/memory/consolidate.py:142-146,151-156,166-171">key, ids = window_key(rows), [r["id"] for r in rows]
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py  summarize_window()</div><pre class="code" data-blocks='[[149, 153, 0], [158, 159, 1], [170, 171, 2], [182, 187, 3]]' data-src="agent/memory/consolidate.py:149-153,158-159,170-171,182-187">key, ids = window_key(rows), [r["id"] for r in rows]
 done = episodic.query_rows("level = 'summary' AND json_extract(meta, '$.window_key') = ?", (key,))
 if done:
     episodic.mark_covered(ids, done[0]["id"])
@@ -812,10 +845,9 @@ if done:
 ...
 prompt = PROMPT.format(n=max(1, -(-len(rows) // 3)))  # about one claim per three raw rows
 data, _ = brain.ask_json([brain.part("text", text + "\n\n" + prompt)], SCHEMA)
-data = data or {"claims": [], "facts": []}
+...
 claims, bad_c = _cited(data["claims"], set(ids))
 facts, bad_f = _cited(data["facts"], set(ids))
-fact_ids = _store_facts(facts, {f["id"] for f in known}, rows[-1]["ts"])
 ...
 if claims:
     summary_id = episodic.store(
@@ -823,7 +855,7 @@ if claims:
     )
 # 0 = looked at, nothing worth a summary (or the junk filter refused it): do not summarize these rows again
 episodic.mark_covered(ids, summary_id or 0)</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Found again</b><span class="txt">The window key is the first and the last row id. After a crash, the summary is found again.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>One claim per three rows</b><span class="txt">The prompt asks for at most one claim per three rows, as JSON.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Code checks citations</b><span class="txt"><code>_cited()</code> drops ids outside the window, and claims with no valid id.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>The summary commits</b><span class="txt">The summary row is the commit marker. The raw rows become covered.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">The first prompt gave one claim per row, and 19% of citations were invalid. Measure the length of a summary, not only its truth.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>2 synthetic days. A <span class="term" tabindex="0" data-def="A second model request. It reads one claim and only the rows that the claim cites.">judge</span> reads each claim.</dd><dt>Output</dt><dd>A verdict per claim.</dd><dt>Metrics</dt><dd>Faithfulness 1.00 (limit 0.90). Invalid citations 0%. Compression 1.31 (limit 1.5): FAIL.</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Found again</b><span class="txt">The window key is the first and the last row id. After a crash, the summary is found again.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>One claim per three rows</b><span class="txt">The prompt asks for at most one claim per three rows, as JSON.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Code checks citations</b><span class="txt"><code>_cited()</code> drops ids outside the window, and claims with no valid id.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>The summary commits</b><span class="txt">The summary row is the commit marker. The raw rows become covered.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">The first claims were longer than the notes they merged. Measure the length of a summary, not only its truth.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>2 synthetic days. A <span class="term" tabindex="0" data-def="A second model request. It reads one claim and only the rows that the claim cites.">judge</span> reads each claim.</dd><dt>Output</dt><dd>A verdict per claim.</dd><dt>Metrics</dt><dd>Faithfulness 1.00 (limit 0.90). Compression 1.75 (limit 1.5). Invalid citations 0%. On E2B 10.5%: FAIL.</dd></dl></li></ol>
   </div>
 </section>
 
@@ -840,6 +872,11 @@ episodic.mark_covered(ids, summary_id or 0)</pre></div></div>
     <div class="legend-row"><span><i class="sw" style="background:#16A34A"></i>ready: summarized at the next run</span><span><i class="sw" style="background:#E69F00"></i>waits</span><span><i class="sw" style="background:#E5583A"></i>now</span></div>
     <div class="win-list" id="win-list"></div>
   </div>
+  <ul class="points row3 sim-points">
+    <li class="point"><b>A window is 30 minutes</b><span>A row joins if it comes less than 30 minutes after the first row.</span></li>
+    <li class="point"><b>Ready when complete</b><span>After those 30 minutes, a window with 2 rows or more is ready.</span></li>
+    <li class="point"><b>The trigger forces</b><span>20 waiting transcripts queue a summary early, also for open windows.</span></li>
+  </ul>
 </section>
 
 <section class="slide" data-type="content" data-part="memory" data-title="Memory: multimodal" id="s-mm">
@@ -875,10 +912,10 @@ episodic.mark_covered(ids, summary_id or 0)</pre></div></div>
   <h2>Evolve: locked blocks in code, the rest in SQLite</h2>
   <p class="rel"><b>Called by</b> <code>write_brief()</code>, <code>reflect()</code> <b>Calls</b> nothing outside <code>evolve.py</code></p>
   <div class="walk" style="grid-template-columns:1.9fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/evolve.py  render()</div><pre class="code" data-blocks='[[148, 150, 0]]' data-src="agent/evolve.py:148-150">prefs = "\n".join(f"{i}. {p}" for i, p in enumerate(version["preferences"], 1)) or "(none yet)"
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/evolve.py  render()</div><pre class="code" data-blocks='[[151, 153, 0]]' data-src="agent/evolve.py:151-153">prefs = "\n".join(f"{i}. {p}" for i, p in enumerate(version["preferences"], 1)) or "(none yet)"
 body = {**LOCKED, "style": version["style"], "preferences": "The user's preferences:\n" + prefs}
-return "\n\n".join(f"### [{'locked' if n in LOCKED else 'editable'}:{n}]\n{body[n]}" for n in ORDER)</pre></div><div class="code-wrap"><div class="code-file">agent/evolve.py  check_locked()</div><pre class="code" data-blocks='[[162, 163, 1]]' data-src="agent/evolve.py:162-163">end = prompt + "\n"  # the last block has no newline after it
-return [n for n, text in LOCKED.items() if end.count(f"### [locked:{n}]\n{text}\n") != 1]</pre></div><div class="code-wrap"><div class="code-file">agent/evolve.py  validate_patch()</div><pre class="code" data-blocks='[[179, 180, 2], [181, 185, 3]]' data-src="agent/evolve.py:179-185">if extra := set(patch) - {"add_preferences", "remove_preferences", "style", "reason"}:
+return "\n\n".join(f"### [{'locked' if n in LOCKED else 'editable'}:{n}]\n{body[n]}" for n in ORDER)</pre></div><div class="code-wrap"><div class="code-file">agent/evolve.py  check_locked()</div><pre class="code" data-blocks='[[165, 166, 1]]' data-src="agent/evolve.py:165-166">end = prompt + "\n"  # the last block has no newline after it
+return [n for n, text in LOCKED.items() if end.count(f"### [locked:{n}]\n{text}\n") != 1]</pre></div><div class="code-wrap"><div class="code-file">agent/evolve.py  validate_patch()</div><pre class="code" data-blocks='[[182, 183, 2], [184, 188, 3]]' data-src="agent/evolve.py:182-188">if extra := set(patch) - {"add_preferences", "remove_preferences", "style", "reason"}:
     raise PatchRejected(f"patch may only edit {EDITABLE}, not {sorted(extra)}")
 style = patch.get("style") or base["style"]
 if "### [" in style or any(text in style for text in LOCKED.values()):
@@ -919,12 +956,13 @@ if len(style) &gt; MAX_STYLE_CHARS:
 
 <section class="slide" data-type="content" data-part="evolve" data-title="Evolve: reflect">
   <h2>Evolve: feedback becomes a new version</h2>
-  <p class="rel"><b>Called by</b> the <code>reflect</code> job, the Evolve tab <b>Calls</b> <code>validate_patch()</code>, <code>new_version()</code></p>
+  <p class="rel"><b>Called by</b> the <code>reflect</code> job, the Evolve tab <b>Calls</b> <code>validate_patch()</code>, <code>_gate()</code>, <code>new_version()</code></p>
   <div class="walk" style="grid-template-columns:1.9fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/evolve.py  reflect()</div><pre class="code" data-blocks='[[358, 361, 0], [363, 368, 1], [371, 375, 2], [378, 380, 3]]' data-src="agent/evolve.py:358-361,363-368,371-375,378-380">feedback = unused_feedback() if feedback is None else feedback
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/evolve.py  reflect()</div><pre class="code" data-blocks='[[501, 505, 0], [507, 512, 1], [516, 520, 2], [527, 528, 3]]' data-src="agent/evolve.py:501-505,507-512,516-520,527-528">feedback = unused_feedback() if feedback is None else feedback
 base = get_version()
+out = {"version": None, "patch": None, "rejected": None, "invented": [], "gate_days": 0}
 if not feedback:
-    return {"version": None, "patch": None, "rejected": "no feedback to reflect on"}
+    return {**out, "rejected": "no feedback to reflect on"}
 ...
 lines = "\n".join(
     f'- The user rated a brief {"good" if f["rating"] &gt; 0 else "bad"} and said: "{f["text"]}"' for f in feedback
@@ -935,14 +973,30 @@ patch, _ = brain.ask_json([brain.part("text", prompt)], PATCH_SCHEMA)
 ...
 try:
     new = validate_patch(base, patch)
-except PatchRejected as e:
-    events.emit("evolve.rejected", reason=str(e), patch=patch)
-    return {"version": None, "patch": patch, "rejected": str(e)}
+    if new == {"style": base["style"], "preferences": base["preferences"]}:
+        return {**out, "rejected": "patch changes nothing"}
+    out["gate_days"] = len(_gate(base, new, days))
 ...
-vid = new_version(base, new["style"], new["preferences"], patch.get("reason", ""), source)
-_mark_used([f["id"] for f in feedback if "id" in f], vid)
-return {"version": vid, "patch": patch, "rejected": None}</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Unused feedback</b><span class="txt">Only feedback that no version used yet.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Ask for a patch</b><span class="txt">Each line says who said what. The model sees only the editable blocks.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Validate</b><span class="txt">Code checks the patch. A refused patch writes an event and no version.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>A new version</b><span class="txt">It becomes active. The old version stays, so a rollback is exact.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">The line "(bad) Start the headline with the word Dentist" taught the opposite rule. Now each line quotes the user. Write feedback with one meaning.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>4 dev and 4 held-out days, a simulated user.</dd><dt>Output</dt><dd>Compliance after 3 rounds.</dd><dt>Metrics</dt><dd>Held-out 0.50 to 1.00 (gain limit 0.10). Regressions 0.</dd></dl></li></ol>
+out["version"] = new_version(base, new["style"], new["preferences"], patch.get("reason", ""), source)
+_mark_used([f["id"] for f in feedback if "id" in f], out["version"])</pre></div></div>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Unused feedback</b><span class="txt">Only feedback that no version used yet.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Ask for a patch</b><span class="txt">Each line says who said what. The model sees only the editable blocks.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Validate, then gate</b><span class="txt">Code checks the patch, then the gate tests it. A refusal writes an event and no version.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>A new version</b><span class="txt">It becomes active. The old version stays, so a rollback is exact.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">The line "(bad) Start the headline with the word Dentist" taught the opposite rule. Now each line quotes the user. Write feedback with one meaning.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>4 dev and 4 held-out days, a simulated user.</dd><dt>Output</dt><dd>Compliance after 3 rounds.</dd><dt>Metrics</dt><dd>Held-out 0.50 to 1.00 (gain limit 0.10). Regressions 0.</dd></dl></li></ol>
+  </div>
+</section>
+
+<section class="slide" data-type="content" data-part="evolve" data-title="Evolve: the generality gate">
+  <h2>Evolve: a new version must hold on other days</h2>
+  <p class="rel"><b>Called by</b> <code>reflect()</code> <b>Calls</b> <code>recent_days()</code>, <code>_compose()</code>, <code>ungrounded()</code></p>
+  <div class="walk" style="grid-template-columns:1.9fr 1fr">
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/evolve.py  _gate()</div><pre class="code" data-blocks='[[478, 479, 0], [480, 482, 1]]' data-src="agent/evolve.py:478-482">n = config.EVOLVE_GATE_DAYS  # 0 turns the gate off
+days = [] if n == 0 else recent_days(n) if days is None else days[:n]
+invented = invented_by(base, new, days)
+if len(invented) &gt; config.EVOLVE_GATE_MAX_INVENTED:
+    raise Ungrounded(invented, len(days))</pre></div><div class="code-wrap"><div class="code-file">agent/evolve.py  invented_by()</div><pre class="code" data-blocks='[[470, 472, 2]]' data-src="agent/evolve.py:470-472">for mems in days:
+    before = set(ungrounded(_compose(mems, base), mems))
+    out |= set(ungrounded(_compose(mems, new), mems)) - before</pre></div><div class="code-wrap"><div class="code-file">agent/evolve.py  ungrounded()</div><pre class="code" data-blocks='[[409, 411, 3]]' data-src="agent/evolve.py:409-411">after_first = line.split(maxsplit=1)[1:]
+names = {n.removesuffix("'s").removesuffix("’s") for n in NAME.findall(" ".join(after_first))}
+out |= {n for n in names if len(n) &gt; 1 and n.lower() not in mem_words}</pre></div></div>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Recent days</b><span class="txt">The 3 newest days that have a stored brief.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Refuse</b><span class="txt">One invented name or number is sufficient. No version is written.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Two briefs per day</b><span class="txt">The parent and the new version each write a brief. Only new inventions count.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>A simple check</b><span class="txt">A capitalized word in a bullet that no memory of that day has.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">The first check read headlines too, and found the names "Brief" and "Day" in every brief. Run a new check on good output first.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>A rule for one day only, 3 rounds. Gate off, then on.</dd><dt>Output</dt><dd>Held-out briefs that name Dr. Lee.</dd><dt>Metrics</dt><dd>Leak 1.00 to 0.00. 3 of 3 refused. Normal patches refused: 0.</dd></dl></li></ol>
   </div>
 </section>
 
@@ -964,7 +1018,7 @@ data, info = brain.ask_json([brain.part("text", text)], RECALL_SCHEMA)
 data = data or {"answer": "", "memory_ids": []}
 known = {h["id"] for h in hits}
 data["memory_ids"] = [i for i in data["memory_ids"] if i in known]  # a cited id must be one it was shown</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Phrase to window</b><span class="txt">"this morning" means 05:00 to 12:00 today.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Search the window</b><span class="txt">The top 6 memories in the window. With none, it searches all.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Ask with ids</b><span class="txt">Each line starts with an id. The reply holds an answer and the ids it used.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Shown ids only</b><span class="txt">An id that the model did not see is removed.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>8 synthetic questions, asked at 14:00. One has no answer.</dd><dt>Output</dt><dd>An answer and its memory ids.</dd><dt>Metrics</dt><dd>Accuracy 0.875 (limit 0.80). Abstain rate 1.0 (limit 1.0).</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Phrase to window</b><span class="txt">"this morning" means 05:00 to 12:00 today.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Search the window</b><span class="txt">The top 6 memories in the window. With none, it searches all.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Ask with ids</b><span class="txt">Each line starts with an id. The reply holds an answer and the ids it used.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Shown ids only</b><span class="txt">An id that the model did not see is removed.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">E2B said "The memories do not contain any information", and the scorer marked it wrong. When a score drops, read the cases before you blame the model.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>8 synthetic questions, asked at 14:00. One has no answer.</dd><dt>Output</dt><dd>An answer and its memory ids.</dd><dt>Metrics</dt><dd>Accuracy 1.00 (limit 0.80). Abstain rate 1.0 (limit 1.0).</dd></dl></li></ol>
   </div>
 </section>
 
@@ -1004,12 +1058,12 @@ mem_id = episodic.store(text, kind="transcript", meta=meta, ts=u["start_ts"], me
         </div>
       </div><div class="fpane" data-i="2">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py</div><pre class="code" data-src="agent/memory/consolidate.py:148-155">text = "Raw memories:\n" + "\n".join(map(_line, rows))
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py</div><pre class="code" data-src="agent/memory/consolidate.py:155-159,170-171">text = "Raw memories:\n" + "\n".join(map(_line, rows))
 if known:
     text += "\n\nKnown facts:\n" + "\n".join(f"[F{f['id']}] {f['text']}" for f in known)
 prompt = PROMPT.format(n=max(1, -(-len(rows) // 3)))  # about one claim per three raw rows
 data, _ = brain.ask_json([brain.part("text", text + "\n\n" + prompt)], SCHEMA)
-data = data or {"claims": [], "facts": []}
+...
 claims, bad_c = _cited(data["claims"], set(ids))
 facts, bad_f = _cited(data["facts"], set(ids))</pre></div><p class="fexplain">The 15-minute schedule summarizes the window. Code keeps only cited ids from 41 to 51.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">Raw memories:
@@ -1077,7 +1131,7 @@ result = {**data, "window": phrase, "memories": [{"id": h["id"], "text": h["text
 <section class="slide" data-type="interactive" data-part="tasks" data-title="Follow Task 4" id="f-task4">
   <h2>Follow Task 4: from a brief to a new version</h2>
   <div class="interactive follow" id="w-f-task4">
-    <div class="fhead"><ol class="fchips"><li><button type="button" class="fchip" data-i="0"><span class="num">1</span>Day memories</button></li><li><button type="button" class="fchip" data-i="1"><span class="num">2</span>Write</button></li><li><button type="button" class="fchip" data-i="2"><span class="num">3</span>Feedback</button></li><li><button type="button" class="fchip" data-i="3"><span class="num">4</span>Reflect</button></li><li><button type="button" class="fchip" data-i="4"><span class="num">5</span>Validate</button></li><li><button type="button" class="fchip" data-i="5"><span class="num">6</span>Diff</button></li><li><button type="button" class="fchip" data-i="6"><span class="num">7</span>Rollback</button></li></ol><button class="reset" type="button">Reset</button></div>
+    <div class="fhead"><ol class="fchips"><li><button type="button" class="fchip" data-i="0"><span class="num">1</span>Day memories</button></li><li><button type="button" class="fchip" data-i="1"><span class="num">2</span>Write</button></li><li><button type="button" class="fchip" data-i="2"><span class="num">3</span>Feedback</button></li><li><button type="button" class="fchip" data-i="3"><span class="num">4</span>Reflect</button></li><li><button type="button" class="fchip" data-i="4"><span class="num">5</span>Validate, gate</button></li><li><button type="button" class="fchip" data-i="5"><span class="num">6</span>Diff</button></li><li><button type="button" class="fchip" data-i="6"><span class="num">7</span>Rollback</button></li></ol><button class="reset" type="button">Reset</button></div>
     <div class="fpane" data-i="0">
         <div class="fgrid">
           <div class="fleft"><div class="code-wrap"><div class="code-file">agent/tasks.py</div><pre class="code" data-src="agent/tasks.py:194-199">start = day_start or time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
@@ -1098,10 +1152,9 @@ return [f"({time.strftime('%H:%M', time.localtime(r['ts']))}, {r['kind']}) {r['t
         </div>
       </div><div class="fpane" data-i="1">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:265-268">version = version or get_version()
-user = "Today's memories:\n" + ("\n".join(f"- {m}" for m in memories) or "- (nothing recorded)")
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:285-287">user = "Today's memories:\n" + ("\n".join(f"- {m}" for m in memories) or "- (nothing recorded)")
 data, _ = brain.ask_json([brain.part("text", user)], BRIEF_SCHEMA, system=render(version))
-data = data or {"headline": "", "sections": []}</pre></div><p class="fexplain">The system prompt comes from <code>render()</code> of the active version, v1. The brief is JSON with a headline and sections.</p></div>
+return data or {"headline": "", "sections": []}</pre></div><p class="fexplain"><code>_compose()</code> sends the day's memories. The system prompt comes from <code>render()</code> of the active version, v1.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">### [locked:identity]
 You are a private assistant that runs fully on
 this device. You write for one user only. ...
@@ -1121,7 +1174,7 @@ The user's preferences:
         </div>
       </div><div class="fpane" data-i="2">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:309-313">with _db() as db:
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:317-321">with _db() as db:
     cur = db.execute(
         "INSERT INTO feedback (ts, brief_id, rating, text, source) VALUES (?,?,?,?,?)",
         (time.time(), brief_id, rating, text, source),
@@ -1132,7 +1185,7 @@ The user's preferences:
         </div>
       </div><div class="fpane" data-i="3">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:363-368">lines = "\n".join(
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:507-512">lines = "\n".join(
     f'- The user rated a brief {"good" if f["rating"] &gt; 0 else "bad"} and said: "{f["text"]}"' for f in feedback
 )
 prefs = "\n".join(f"{i}. {p}" for i, p in enumerate(base["preferences"], 1)) or "(none)"
@@ -1149,23 +1202,26 @@ Reply:
         </div>
       </div><div class="fpane" data-i="4">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:371-378">try:
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:516-520,527-527">try:
     new = validate_patch(base, patch)
-except PatchRejected as e:
-    events.emit("evolve.rejected", reason=str(e), patch=patch)
-    return {"version": None, "patch": patch, "rejected": str(e)}
-if new == {"style": base["style"], "preferences": base["preferences"]}:
-    return {"version": None, "patch": patch, "rejected": "patch changes nothing"}
-vid = new_version(base, new["style"], new["preferences"], patch.get("reason", ""), source)</pre></div><p class="fexplain">Code checks the patch and writes version 2. Version 1 stays as it was.</p></div>
+    if new == {"style": base["style"], "preferences": base["preferences"]}:
+        return {**out, "rejected": "patch changes nothing"}
+    out["gate_days"] = len(_gate(base, new, days))
+...
+out["version"] = new_version(base, new["style"], new["preferences"], patch.get("reason", ""), source)</pre></div><p class="fexplain">Code checks the patch. The gate finds no invented name or number, so version 2 is written. Version 1 stays as it was.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">validate_patch(v1, patch) -&gt;
 {"style": "Write the user's end-of-day brief ...",
  "preferences": ["Use at most 6 bullets in total."]}
+
+_gate(v1, new, days) -&gt;
+3 recent days, 2 briefs for each day
+invented by the new version: []
 
 version 2  parent 1  source "reflect"  active</pre></div>
         </div>
       </div><div class="fpane" data-i="5">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:246-247">old, new = render(get_version(a)).splitlines(), render(get_version(b)).splitlines()
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:249-250">old, new = render(get_version(a)).splitlines(), render(get_version(b)).splitlines()
 return "\n".join(difflib.unified_diff(old, new, f"v{a}", f"v{b}", lineterm="", n=1))</pre></div><p class="fexplain">The Evolve tab shows this diff. Only an editable block changed.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">--- v1
 +++ v2
@@ -1177,7 +1233,7 @@ return "\n".join(difflib.unified_diff(old, new, f"v{a}", f"v{b}", lineterm="", n
         </div>
       </div><div class="fpane" data-i="6">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:229-233">v = get_version(version_id)
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/evolve.py</div><pre class="code" data-src="agent/evolve.py:232-236">v = get_version(version_id)
 with _db() as db:
     db.execute("INSERT OR REPLACE INTO active VALUES ('brief', ?)", (version_id,))
 events.emit("evolve.rollback", version=version_id)
@@ -1190,6 +1246,17 @@ event "evolve.rollback" {"version": 1}</pre></div>
   </div>
 </section>
 
+<section class="slide" data-type="content" data-part="rules" data-title="Four rules" id="s-rules" data-part-label="Rules">
+  <h2>Four rules that explain Part 2</h2>
+  <ul class="cards two">
+    <li class="card"><b>1. The model proposes, code decides</b><code>_cited(), recall(), validate_patch(), _gate()</code><span>Code checks each citation, each memory id and each prompt patch before something is stored.</span></li>
+    <li class="card"><b>2. Each step is safe to run twice</b><code>agent/checkpoint.py</code><span>A crash can repeat one step. The window key, the duplicate filter and the stored results make the second run safe.</span></li>
+    <li class="card"><b>3. Two processes, one set of files</b><code>data/runtime/*.sqlite</code><span>The daemon and the dashboard share only SQLite files. One continues when the other stops.</span></li>
+    <li class="card"><b>4. Each part has a number and a limit</b><code>evals/, config.THRESHOLDS</code><span>The cases are synthetic. Add your own recordings and days before you trust a score.</span></li>
+  </ul>
+  <p class="goal">Next, you see each rule in the code while it runs.</p>
+</section>
+
 <section class="slide" data-type="handoff" data-part="live" data-part-label="Live" data-title="Now the code">
   <p class="eyebrow">Now we run it</p>
   <h2>Run the daemon, kill it, and teach it</h2>
@@ -1197,7 +1264,7 @@ event "evolve.rollback" {"version": 1}</pre></div>
     <li><b>Kill the daemon, then start it</b><span>Look at <code>checkpoint.recovered</code> in the feed, and at the steps that are skipped.</span></li>
     <li><b>Task 3: replay and recall</b><span>Look at the memory ids in the answer: a summary, or raw transcripts.</span></li>
     <li><b>Task 4: one round of feedback</b><span>Look at the prompt diff. Only the editable blocks change. Then roll back.</span></li>
-    <li><b>Scorecard with Part 2</b><span>Look at the compression ratio. It is the one Part 2 metric that fails.</span></li>
+    <li><b>Scorecard with Part 2</b><span>Look at the one check that fails: invalid citations on E2B. Code dropped those ids before it stored them.</span></li>
   </ol>
 </section>
 
@@ -1218,7 +1285,7 @@ event "evolve.rollback" {"version": 1}</pre></div>
     </div>
     <ul class="points">
       <li class="point"><b>Requirements</b><span>About 13 GB of disk, with Whisper large-v3-turbo (1.6 GB). 16 GB of memory works with E2B. 24 GB or more is better for E4B.</span></li>
-      <li class="point"><b>What is verified</b><span>Apple Silicon only: M4, 24 GB. Every Part 2 number is E4B on synthetic cases.</span></li>
+      <li class="point"><b>What is verified</b><span>Apple Silicon only: M4, 24 GB. The Part 2 numbers are E4B on synthetic cases, unless a slide says E2B.</span></li>
       <li class="point"><b>Not verified yet</b><span>The live microphone (only replays ran), <code>daemon install</code> at login, and a soak of several hours.</span></li>
       <li class="point"><b>Test it on your data</b><span><code>python cli.py evals add task3</code> adds your own recording and questions. <code>evals add task4</code> adds your days.</span></li>
     </ul>

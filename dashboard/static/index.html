@@ -62,8 +62,8 @@
 
       <div class="card"><h3>Servers</h3>
         <div id="serving-info" class="servers"></div>
-        <p class="hint">E2B is the smaller model: it uses less memory and replies faster. E4B is larger. Switch with the Model menu at the top.
-          The memory number can drop while the model is idle, because the operating system can page out the model file. That is normal.</p>
+        <p class="hint">E2B is the smaller model: it uses less memory and replies faster. Switch with the Model menu at the top.
+          The memory number can drop while a model is idle. That is normal.</p>
         <details class="more" id="serving-cmd" hidden><summary>How the servers were started</summary><div id="serving-cmd-body"></div></details>
       </div>
 
@@ -107,6 +107,10 @@
               <span id="turn-pos" class="muted"></span>
               <button id="turn-next" class="small" aria-label="Later message">Later ›</button></div></div>
           <p id="turn-title" class="turn-title"></p>
+          <p class="hint turn-from"><span id="turn-from"></span>
+            <label class="field" for="turn-source">Show <select id="turn-source" title="Evals, the command line and the daemon write model requests to the same log">
+              <option value="dashboard">only what I sent from this dashboard</option>
+              <option value="all">everything, with evals and daemon jobs</option></select></label></p>
           <ol id="turn-steps" class="steps"></ol></div>
         <div class="card"><h3>Context budget</h3>
           <p class="hint">The model has a fixed amount of room. This is how much the message used, and what filled it.</p>
@@ -161,8 +165,15 @@
 
     <div class="panel" id="panel-daemon" role="tabpanel">
       <div class="page-head"><h2>Always on</h2>
-        <p>The daemon is its own process. It runs jobs from a queue, on a schedule and on triggers, and writes every step down
-          (intent, execution, result), so a crash loses nothing. Start it with <code>python cli.py daemon start</code> or the button.</p></div>
+        <p>The daemon is its own process that runs jobs while you do other things. It writes every step down, so a crash loses nothing.</p></div>
+      <div class="card"><h3>How a job runs</h3>
+        <ol class="flow gates">
+          <li><div><b>Asked for</b><span>By the schedule, a trigger, or you</span></div></li>
+          <li><div><b>Queue</b><span>One job runs at a time</span></div></li>
+          <li><div><b>Steps</b><span>Intent, execution, result: each is a row on disk</span></div></li>
+          <li><div><b>Feed</b><span>What it did, and the reason</span></div></li>
+        </ol>
+        <p class="hint flow-note">After a kill, the next start skips every step that has a result row. You can also start the daemon with <code>python cli.py daemon start</code>.</p></div>
       <div class="card"><h3>Daemon <span id="daemon-state" class="muted"></span>
           <span class="head-action"><button id="daemon-start" class="small primary" data-busy="Starting…">Start</button>
           <button id="daemon-stop" class="small" data-busy="Stopping…">Stop</button>
@@ -171,24 +182,34 @@
         <div class="row" style="margin-top:12px"><button id="listen-switch" class="mic paused" role="switch" aria-checked="false">Always-on listening off</button>
           <span class="hint">The daemon transcribes what it hears with Whisper and stores it as raw memories. The Mic switch at the top still pauses it.</span></div></div>
       <div class="card"><h3>What the agent did on its own</h3>
-        <p class="hint">Every job the daemon finished, with the reason it ran: a schedule, a trigger, a recovered crash, or you.</p>
+        <p class="hint">Each finished job, newest first, with the reason it ran.</p>
         <div id="daemon-feed"></div></div>
       <div class="card"><h3>Jobs and checkpoints</h3>
-        <p class="hint">Open a job to see each step in three phases. After a kill, the finished steps of the recovered job are skipped, not run again.</p>
+        <p class="hint">Open a job to see the three rows of each step.</p>
         <div id="daemon-jobs"></div></div>
       <div class="card"><h3>Schedule</h3><div id="daemon-schedule"></div></div>
     </div>
 
     <div class="panel" id="panel-evolve" role="tabpanel">
       <div class="page-head"><h2>Evolve</h2>
-        <p>The daily brief learns from your feedback. A reflection step reads the feedback and patches only the editable blocks of its prompt.
-          Every patch is a new version, so you can roll back to any version. Locked blocks live in code and are checked on every version.</p></div>
+        <p>The daily brief learns from your feedback. The model can change only the editable blocks of its prompt, and code checks every change.</p></div>
+      <div class="card"><h3>How feedback becomes a new version</h3>
+        <ol class="flow gates">
+          <li><div><b>Feedback</b><span>Your words on a brief</span></div></li>
+          <li><div><b>Patch</b><span>The model proposes a change</span></div></li>
+          <li><div><b>Validate</b><span>Code: editable blocks only</span></div></li>
+          <li><div><b>Gate</b><span>Code: no invented names or numbers on recent days</span></div></li>
+          <li><div class="gate-out"><b>New version</b><span>Old versions stay, so you can roll back</span></div></li>
+        </ol></div>
       <div class="card"><h3>Active prompt <span id="evolve-version" class="muted"></span><span id="evolve-locked" class="head-action"></span></h3>
         <div id="evolve-prompt"></div></div>
       <div class="card"><h3>Versions <span class="head-action"><button id="reflect-btn" class="small primary" data-busy="Reflecting…">Reflect on feedback now</button></span></h3>
         <p class="hint" id="evolve-pending"></p>
         <div id="evolve-versions"></div></div>
       <div class="card" id="evolve-diff-card" hidden><h3>What changed <span id="evolve-diff-label" class="muted"></span></h3><div id="evolve-diff"></div></div>
+      <div class="card"><h3>Refused patches</h3>
+        <p class="hint">A patch that fails the validator or the gate makes no version. The active prompt stays as it was.</p>
+        <div id="evolve-refused"></div></div>
       <div class="card"><h3>Feedback</h3><p class="hint">"simulated" rows come from the code-checkable user of the Task 4 eval, never from a person.</p>
         <div id="evolve-feedback"></div></div>
     </div>
