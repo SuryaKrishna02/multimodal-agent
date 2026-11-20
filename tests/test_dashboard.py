@@ -38,8 +38,9 @@ class TempChat(unittest.TestCase):
         for patcher in (
             mock.patch.object(config, "RUNTIME", self.root),  # the event log too: tests never write to yours
             mock.patch.object(config, "CHAT_FILE", self.root / "chat.json"),
+            mock.patch.object(config, "CHAT_DIR", self.root / "chats"),
             mock.patch.object(chat.screen, "CAPTURES", self.root / "captures"),
-            mock.patch.dict(chat.state, {"history": None, "mic": None}),
+            mock.patch.dict(chat.state, {"session": None, "mic": None}),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -108,14 +109,48 @@ class Conversation(TempChat):
         return mock.patch.object(brain, "respond", return_value={"text": text, "memories": [memory]})
 
     def test_a_restart_reads_the_same_conversation_back(self) -> None:
-        """The file holds every message; a new process (history None) loads it, with the recalled memories."""
+        """The file holds every message; a new process (session None) loads it, with the recalled memories."""
         with self.reply():
             chat.chat({"text": "hello"})
-        chat.state["history"] = None  # what a restarted dashboard sees
+        sid = chat.session()["id"]
+        chat.state["session"] = None  # what a restarted dashboard sees
         saved = chat.chat_history()
         self.assertEqual([m["role"] for m in saved], ["user", "assistant"])
         self.assertEqual(saved[1]["ui"]["memories"][0]["id"], 7)
-        self.assertEqual(json.loads(config.CHAT_FILE.read_text()), saved)
+        self.assertEqual(json.loads((config.CHAT_DIR / f"{sid}.json").read_text())["messages"], saved)
+
+    def test_the_conversation_of_an_older_version_becomes_the_first_session(self) -> None:
+        """Read CHAT_FILE when no session is saved yet, so an upgrade keeps the conversation."""
+        config.CHAT_FILE.write_text(json.dumps([{"role": "user", "content": "from before"}]))
+        self.assertEqual(chat.chat_history()[0]["content"], "from before")
+        self.assertEqual([s["title"] for s in chat.chat_sessions()], ["from before"])
+
+    def test_a_new_session_starts_empty_and_the_old_one_can_be_opened(self) -> None:
+        """Each session has its own messages: the model gets no history from another session."""
+        with self.reply() as respond:
+            chat.chat({"text": "first chat"})
+            first = chat.session()["id"]
+            chat.chat_new()
+            chat.chat({"text": "second chat"})
+            self.assertEqual(respond.call_args.kwargs["history"], [])
+        listed = chat.chat_sessions()
+        self.assertEqual([(s["title"], s["current"]) for s in listed], [("second chat", True), ("first chat", False)])
+        self.assertEqual(chat.chat_open({"id": first})[0]["content"], "first chat")
+        self.assertEqual(chat.chat_history()[0]["content"], "first chat")
+
+    def test_delete_removes_one_session_and_refuses_an_unknown_id(self) -> None:
+        """Delete only the named session. An id that is not ours never reaches the file system."""
+        with self.reply():
+            chat.chat({"text": "keep me"})
+            chat.chat_new()
+            chat.chat({"text": "delete me"})
+        left = chat.chat_delete({"id": chat.session()["id"]})
+        self.assertEqual([s["title"] for s in left], ["keep me"])
+        self.assertEqual(chat.chat_history(), [])
+        for bad in ("../../etc/passwd", "20260101-000000-zzzz", ""):
+            with self.assertRaises(chat.HTTPException) as caught:
+                chat.chat_open({"id": bad})
+            self.assertEqual(caught.exception.status_code, 404)
 
     def test_a_picture_goes_to_the_model_and_clear_deletes_it(self) -> None:
         """A pasted picture is saved, sent as an image part, and removed with the conversation."""

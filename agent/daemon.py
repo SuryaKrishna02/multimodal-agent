@@ -195,7 +195,8 @@ def status() -> dict:
     """Report whether a daemon runs, from its last heartbeat.
 
     Returns:
-        dict: `alive`, `pid`, `age_s` (seconds since the heartbeat), `started`, `listening`, `job` and `queued`.
+        dict: `alive`, `pid`, `age_s` (seconds since the heartbeat), `started`, `listening`, `mic_warning`
+            (the silent-microphone warning, or None), `job` and `queued`.
     """
     beat = checkpoint.get("daemon") or {}
     age = time.time() - beat.get("ts", 0)
@@ -271,6 +272,7 @@ class Daemon:
                     "started": self.started,
                     "job": {"id": j["id"], "kind": j["kind"]} if j else None,
                     "listening": self.listener is not None,
+                    "mic_warning": self.listener.warning if self.listener else None,
                     "rss_mb": round(psutil.Process().memory_info().rss / 1e6, 1),
                 },
             )

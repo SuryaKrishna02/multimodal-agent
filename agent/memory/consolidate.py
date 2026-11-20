@@ -18,25 +18,40 @@ from pathlib import Path
 from agent import brain, config, events
 from agent.memory import episodic
 
-CLAIM = {
-    "type": "object",
-    "properties": {"text": {"type": "string"}, "sources": {"type": "array", "items": {"type": "integer"}}},
-    "required": ["text", "sources"],
-}
-FACT = {
-    "type": "object",
-    "properties": {
-        "text": {"type": "string"},
-        "sources": {"type": "array", "items": {"type": "integer"}},
-        "replaces": {"type": "array", "items": {"type": "integer"}},
-    },
-    "required": ["text", "sources", "replaces"],
-}
-SCHEMA = {
-    "type": "object",
-    "properties": {"claims": {"type": "array", "items": CLAIM}, "facts": {"type": "array", "items": FACT}},
-    "required": ["claims", "facts"],
-}
+
+def reply_schema(ids: list[int]) -> dict:
+    """Build the JSON schema of one summary reply. A source can only be one of the window's row ids.
+
+    The server turns the schema into a grammar, so the model cannot write an id from outside the window.
+    Without the list, E2B cited one such id in each synthetic log. See docs/VERIFICATION.md.
+
+    Args:
+        ids (list[int]): The ids of the raw rows in the window.
+
+    Returns:
+        dict: The schema for `brain.ask_json`.
+    """
+    sources = {"type": "array", "items": {"type": "integer", "enum": ids}}
+    claim = {
+        "type": "object",
+        "properties": {"text": {"type": "string"}, "sources": sources},
+        "required": ["text", "sources"],
+    }
+    fact = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+            "sources": sources,
+            "replaces": {"type": "array", "items": {"type": "integer"}},
+        },
+        "required": ["text", "sources", "replaces"],
+    }
+    return {
+        "type": "object",
+        "properties": {"claims": {"type": "array", "items": claim}, "facts": {"type": "array", "items": fact}},
+        "required": ["claims", "facts"],
+    }
+
 
 PROMPT = """Above are raw memories from one stretch of time. Each starts with its [id].
 Summarize them in at most {n} claims: merge related memories into one claim.
@@ -50,6 +65,7 @@ Do not add anything that the memories do not say."""
 
 # The model sometimes copies its citation into the text ("... Monday. Sources: [1]"). The ids belong in "sources".
 CITED_SUFFIX = re.compile(r"\s*\(?\b(?:sources?|ids?)\s*:\s*\[?[\d,\s\[\]]*\]?\)?\.?\s*$", re.I)
+ID_LIST_SUFFIX = re.compile(r"\s*[(\[]\s*(\d+(?:\s*,\s*\d+)*)\s*[)\]]\.?\s*$")  # "... on Wednesday. (22, 23)"
 
 JUDGE = {
     "type": "object",
@@ -119,6 +135,15 @@ def _known_facts(rows: list[dict]) -> list[dict]:
     return episodic.search(query, k=5, levels=("fact",))
 
 
+def _claim_text(text: str, sources: list[int]) -> str:
+    """Remove a citation that the model copied to the end of the text. A number that is not a source stays."""
+    text = CITED_SUFFIX.sub("", text).strip()
+    m = ID_LIST_SUFFIX.search(text)
+    if m and {int(n) for n in m.group(1).split(",")} <= set(sources):
+        text = text[: m.start()].strip()
+    return text
+
+
 def _cited(items: list[dict], allowed: set[int]) -> tuple[list[dict], int]:
     """Keep only the cited ids that exist in `allowed`, and drop items that cite nothing valid.
 
@@ -127,9 +152,10 @@ def _cited(items: list[dict], allowed: set[int]) -> tuple[list[dict], int]:
     """
     kept, bad = [], 0
     for it in items:
-        good = [i for i in it["sources"] if i in allowed]
-        bad += len(it["sources"]) - len(good)
-        text = CITED_SUFFIX.sub("", it["text"]).strip()
+        cited = list(dict.fromkeys(it["sources"]))  # the same id twice is one citation
+        good = [i for i in cited if i in allowed]
+        bad += len(cited) - len(good)
+        text = _claim_text(it["text"], cited)
         if good and text:
             kept.append({**it, "text": text, "sources": good})
     return kept, bad
@@ -156,7 +182,7 @@ def summarize_window(rows: list[dict]) -> dict:
     if known:
         text += "\n\nKnown facts:\n" + "\n".join(f"[F{f['id']}] {f['text']}" for f in known)
     prompt = PROMPT.format(n=max(1, -(-len(rows) // 3)))  # about one claim per three raw rows
-    data, _ = brain.ask_json([brain.part("text", text + "\n\n" + prompt)], SCHEMA)
+    data, _ = brain.ask_json([brain.part("text", text + "\n\n" + prompt)], reply_schema(ids))
     if data is None:  # no valid JSON: leave the rows uncovered, so forget() cannot delete them unsummarized
         events.emit("memory.consolidate_failed", window=key, rows=len(rows))
         return {

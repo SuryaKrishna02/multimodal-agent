@@ -205,6 +205,23 @@ class Consolidation(TempRuntime):
         self.assertEqual((kept[0]["text"], bad), ("Plumber fixes the sink on Monday.", 0))
         same = [{"text": "Room 12 is booked for 3 people", "sources": [1]}]
         self.assertEqual(consolidate._cited(same, {1})[0][0]["text"], "Room 12 is booked for 3 people")
+        ids = [{"text": "Deposit due Wednesday. (22, 23)", "sources": [22, 23]}]
+        self.assertEqual(consolidate._cited(ids, {22, 23})[0][0]["text"], "Deposit due Wednesday.")
+        number = [{"text": "The table is for a group (6)", "sources": [1]}]
+        self.assertEqual(consolidate._cited(number, {1})[0][0]["text"], "The table is for a group (6)")
+
+    def test_the_reply_schema_allows_only_ids_of_the_window(self) -> None:
+        """Send the window's row ids as the only allowed sources, so the server's grammar refuses any other id."""
+        rows = consolidate.pending(force=True)[0]
+        ids = [r["id"] for r in rows]
+        with mock.patch.object(consolidate.brain, "ask_json", return_value=(self.reply(), {})) as ask:
+            consolidate.summarize_window(rows)
+        schema = ask.call_args.args[1]
+        for item in ("claims", "facts"):
+            self.assertEqual(schema["properties"][item]["items"]["properties"]["sources"]["items"]["enum"], ids)
+        self.assertEqual(
+            consolidate._cited([{"text": "Twice", "sources": [1, 1, 9]}], {1}), ([{"text": "Twice", "sources": [1]}], 1)
+        )
 
     def test_a_failed_model_reply_leaves_the_rows_for_the_next_run(self) -> None:
         """No valid JSON: nothing is marked covered, so forget() can never delete rows that no summary holds."""

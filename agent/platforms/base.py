@@ -44,6 +44,7 @@ class Platform:
         raw_video_suffix (str): Container that `record_screen` writes.
         monospace_font (str | None): Path of a font for the rendered test images of the smoke test and the synthetic evals, or None for the Pillow default.
         screen_blank_hint (str): Advice shown when a screenshot comes back blank.
+        mic_silent_hint (str): Advice shown when the microphone stream delivers only silence after it opens.
     """
 
     name = "generic"  # must equal the file name, e.g. macos.py -> "macos"
@@ -54,6 +55,10 @@ class Platform:
     raw_video_suffix = ".mp4"  # container that record_screen() writes
     monospace_font: str | None = None  # path to a TTF/TTC for rendered test images; None = Pillow default
     screen_blank_hint = "The screenshot is blank. Your OS may be blocking screen capture for this terminal app."
+    mic_silent_hint = (
+        "The microphone delivers only silence. Your OS may be blocking the Microphone permission for this process, "
+        "or the input is muted."
+    )
 
     @classmethod
     def matches(cls) -> bool:

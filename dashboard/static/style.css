@@ -200,7 +200,17 @@ select { padding-right: 6px; cursor: pointer; }
 .attach button { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; border-radius: 50%;
   font-size: 14px; line-height: 1; border: 0; background: var(--card); color: var(--muted); }
 #chat.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
-.chat-head-note { font-size: 12.5px; margin-left: auto; margin-right: 10px; }
+.chat-head h2 { margin-right: auto; }
+.chat-head button + button { margin-left: 8px; }
+#chat-sessions { flex: 1; overflow: auto; padding: 14px 16px; }
+#chat.show-sessions #chat-log, #chat.show-sessions #chat-empty, #chat.show-sessions #chat-form { display: none; }
+.session-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.session-row:first-child { border-top: 0; }
+.session-open { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 6px 8px; border-radius: 8px; }
+.session-open:hover { background: var(--surface); }
+.session-open b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-open span { display: block; font-size: 13px; font-weight: 450; color: var(--muted); }
+.session-row.current .session-open b { color: var(--accent); }
 .msg.user { white-space: normal; }
 .msg-text { white-space: pre-wrap; }
 .msg-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -528,3 +538,9 @@ button.step-body.selected { border-color: var(--accent); background: var(--accen
 .heard div:first-child { border-top: 0; }
 .cites { margin-top: 8px; font-size: 13px; color: var(--muted); }
 .cites .hit { color: var(--text); }
+
+/* Simple view (the default): only the main cards of each tab. The Details switch in the header shows the rest. */
+body.simple .detail, body.simple .card > p.hint:not(.keep), body.simple .eval-table tr.extra, body.simple .metric-desc,
+body.simple .tab-sub, body.simple .tagline { display: none; }
+.simple-note { margin: 4px 2px 0; font-size: 13.5px; color: var(--muted); }
+body:not(.simple) .simple-note { display: none; }

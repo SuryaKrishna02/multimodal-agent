@@ -73,6 +73,9 @@ Press the number keys to switch tabs. The page is light only. The chat sits on t
 the tabs more room. A bar at the bottom opens the Activity log (the event log). A dot on a tab lights up while that part
 of the agent is working.
 
+Each tab opens in a simple view with its main cards only. Press Show details at the top (or the D key) to add the
+other cards, the tables, the explanations and the metrics that have no target. The page remembers the choice.
+
 The chat takes text, a picture, your screen or your voice:
 
 - **Picture**: pick a file, paste one (Cmd+V / Ctrl+V), or drop one on the chat panel. It goes to Gemma 4 as an image.
@@ -90,8 +93,11 @@ The Brain tab shows only what you sent from the dashboard. Its Show menu adds th
 evals and the daemon, which write to the same event log. The Evolve tab lists each prompt patch that the validator or
 the generality gate refused, with the reason.
 
-The conversation is saved in `data/runtime/chat.json`, so it survives a restart of the dashboard. Clear chat empties it
-and deletes its pictures. Long-term memories stay.
+The chat has sessions. New chat starts an empty conversation, and the old one stays under History, where you can open
+it again or delete it. The model reads only the messages of the open session (the last 6, `config.CHAT_HISTORY_MESSAGES`).
+Long-term memory is shared by all sessions: each reply gets the 3 best matches (`config.MEMORY_TOP_K`), and each
+`search_memory` call of the model returns 3 more for its own query. The number of stored memories has no limit. Each session is one file in `data/runtime/chats/`, so it survives a restart of the
+dashboard. Deleting a session deletes its messages and its pictures. Long-term memories stay.
 
 When a tool call waits for your approval, Approve and Deny appear in the chat, above the message box. With the chat
 hidden or on a narrow window, they appear in a banner at the top instead. After you decide, the chat history holds the
@@ -146,8 +152,25 @@ For the live demo of Task 4, you can run some feedback rounds before the session
 again after a crash. A clean `daemon stop` exits with code 0, so launchd does not restart it.
 `python cli.py daemon uninstall` removes the LaunchAgent.
 
-We did not test whether a process that launchd starts gets the Microphone permission of your terminal app. Check
-`listen on` once after you install it.
+A daemon that launchd starts does not get the Microphone permission of your terminal app, and macOS gives a process
+without the permission silent audio instead of an error. So on macOS, `daemon install` builds a small app,
+`.cache/autostart/multimodal-agent.app` (it needs `swiftc`, from the Xcode Command Line Tools:
+`xcode-select --install`). launchd runs the daemon through this app. The first time it starts, macOS asks whether
+"multimodal-agent" can use the microphone. Click **Allow**. After that, always-on listening works in the daemon that
+launchd starts (tested on macOS 27 with real speech). If you clicked Don't Allow, turn on "multimodal-agent" in
+System Settings > Privacy & Security > Microphone, then run `python cli.py daemon install` again.
+
+The app keeps the permission while its source stays the same. If an update changes
+`agent/platforms/macos_launcher.swift`, `daemon install` rebuilds the app and macOS asks again.
+`daemon uninstall` leaves the app in `.cache/autostart/`, so a later `daemon install` keeps the permission.
+
+The daemon gets the `PATH` of the shell that runs `daemon install` (launchd's own `PATH` has no Homebrew, so video
+requests could not find `ffprobe`). Run `daemon install` again after you install a tool in a new place.
+
+If the microphone still gives only silence, always-on listening emits `senses.ambient.warning` 5 s after it opens
+the microphone (`AMBIENT_SILENT_S` and `AMBIENT_SILENT_RMS` in `agent/config.py`). The dashboard shows it, and
+`python cli.py daemon status` shows it as `mic_warning`. Stop a daemon that `daemon start` started before you run
+`daemon install`, because there is no lock against a second copy.
 
 **Keep the Mac awake.** While the daemon runs, it holds `caffeinate -i`, so idle sleep does not stop it. The hold ends
 when the daemon exits, even after a kill. A Mac laptop still sleeps when you close the lid, unless it is on power with

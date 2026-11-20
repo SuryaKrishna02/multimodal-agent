@@ -159,6 +159,7 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   if (e.key === "c") setChatHidden(!document.body.classList.contains("chat-hidden"));
+  if (e.key === "d") setDetails(document.body.classList.contains("simple"));
   const b = TABS[Number(e.key) - 1];
   if (b) showTab(b.dataset.tab);
 });
@@ -176,6 +177,15 @@ function setChatHidden(hidden) {
   localStorage.setItem("chatHidden", hidden ? "1" : "");
 }
 $("#chat-toggle").onclick = () => setChatHidden(!document.body.classList.contains("chat-hidden"));
+// Simple view is the default: each tab shows its main cards only. Details adds the extra cards, tables and hints.
+function setDetails(on) {
+  document.body.classList.toggle("simple", !on);
+  $("#detail-switch").textContent = on ? "Hide details" : "Show details";
+  $("#detail-switch").setAttribute("aria-checked", String(on));
+  localStorage.setItem("details", on ? "1" : "");
+}
+$("#detail-switch").onclick = () => setDetails(document.body.classList.contains("simple"));
+setDetails(!!localStorage.getItem("details"));
 setChatHidden(!!localStorage.getItem("chatHidden"));
 
 // --- Header state -------------------------------------------------------------
@@ -639,7 +649,7 @@ function renderReply(reply) {
 // --- Chat -------------------------------------------------------------------
 // Clear stays visible, so people can find it. It is off when there is nothing to clear, and while a reply
 // is on its way, because the server would add that reply to the conversation that was just cleared.
-const syncChatClear = () => { $("#chat-clear").disabled = !!chatPending || !$("#chat-log").children.length; };
+const syncChatClear = () => { $("#chat-new").disabled = !!chatPending || !$("#chat-log").children.length; };
 function addMsg(cls, html) {
   $("#chat-empty").hidden = true;
   const log = $("#chat-log");
@@ -786,21 +796,54 @@ document.addEventListener("click", (e) => {
   showTab("brain");
 });
 
-$("#chat-clear").onclick = (e) => busy(e.target, async () => {
-  await api("/api/chat/clear", {});
+// --- Chat sessions: New chat keeps the old one, History lists them ---------------
+function showChat(history) {
   $("#chat-log").innerHTML = "";
-  $("#chat-empty").hidden = false;
-  toast("Chat cleared. Long-term memories stay.");
-}).finally(syncChatClear);
-// The server keeps the conversation over a reload and a restart, so show the same one the model still has.
-async function loadChat() {
-  let history;
-  try { history = await api("/api/chat"); } catch { return; }
+  $("#chat-empty").hidden = history.length > 0;
   for (const m of history) {
     if (m.approval) addApprovalMsg(m.approval.tool, m.approval);
     else if (m.role === "user") addMsg("user", userHtml(m.content, m.ui));
     else addMsg(m.ui?.kind === "brief" ? "agent brief" : "agent", agentHtml(m.content, m.ui));
   }
+  syncChatClear();
+}
+function setSessionsOpen(open) {
+  $("#chat-sessions").hidden = !open;
+  $("#chat").classList.toggle("show-sessions", open);
+  $("#chat-history").setAttribute("aria-expanded", String(open));
+  $("#chat-history").textContent = open ? "Back to chat" : "History";
+  if (open) renderSessions();
+}
+async function renderSessions(list) {
+  try { list = list || await api("/api/chat/sessions"); } catch { return; }
+  $("#chat-session-list").innerHTML = list.map((s) => `<div class="session-row${s.current ? " current" : ""}">
+    <button type="button" class="session-open" data-session="${esc(s.id)}"><b>${esc(s.title)}</b>
+      <span>${esc(fmtWhen(new Date(s.updated * 1000).toISOString()))} · ${plural(s.messages, "message")}${s.current ? " · open now" : ""}</span></button>
+    <button type="button" class="small session-delete" data-delete="${esc(s.id)}" aria-label="Delete this chat" title="Delete this chat and its pictures. Long-term memories stay.">Delete</button></div>`).join("")
+    || '<div class="none">No saved chats yet. Send a message to start one.</div>';
+}
+$("#chat-history").onclick = () => setSessionsOpen($("#chat-sessions").hidden);
+$("#chat-new").onclick = async () => {
+  await api("/api/chat/new", {});
+  showChat([]);
+  setSessionsOpen(false);
+  $("#chat-input").focus();
+};
+$("#chat-session-list").onclick = async (e) => {
+  if (chatPending) { toast("Wait for the reply first.", "error"); return; }
+  const open = e.target.closest("[data-session]"), del = e.target.closest("[data-delete]");
+  if (open) {
+    showChat(await api("/api/chat/open", { id: open.dataset.session }));
+    setSessionsOpen(false);
+  }
+  if (del && confirm("Delete this chat and its pictures? Long-term memories stay.")) {
+    renderSessions(await api("/api/chat/delete", { id: del.dataset.delete }));
+    showChat(await api("/api/chat"));
+  }
+};
+// The server keeps the conversation over a reload and a restart, so show the same one the model still has.
+async function loadChat() {
+  try { showChat(await api("/api/chat")); } catch { /* the server is not up yet */ }
 }
 
 // A new stored brief (from the daemon at 18:00, or the Tasks tab) joins the conversation once.
@@ -1154,7 +1197,7 @@ function renderScoreSummary(rows) {
       [src, "", "Test cases"],
       [whens.length ? fmtWhen(whens[whens.length - 1]) : "–", "", "Latest run"],
     ])}</div></div>
-    ${sourceTotals.synthetic ? `<div class="source-note"><b>Read with care: ${sourceTotals.user ? "most" : "all"} of these cases are synthetic.</b> They are generated by code, and we know the right answer by construction. But text-to-speech is cleaner than a real voice, and a drawn terminal is cleaner than a real screen, so speech, voice detection and Task 1 scores are optimistic. A drop is a real regression; a pass does not prove it works for you.</div>` : ""}`;
+    ${sourceTotals.synthetic ? `<div class="source-note"><b>Read with care: ${sourceTotals.user ? "most" : "all"} of these cases are synthetic.</b><span class="detail"> They are generated by code, and we know the right answer by construction. But text-to-speech is cleaner than a real voice, and a drawn terminal is cleaner than a real screen, so speech, voice detection and Task 1 scores are optimistic. A drop is a real regression; a pass does not prove it works for you.</span></div>` : ""}`;
 }
 const openEvals = new Set();
 const autoOpened = new Set();

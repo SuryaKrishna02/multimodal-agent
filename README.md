@@ -60,7 +60,7 @@ evals/synthetic/     generates the synthetic cases (speech, screenshots, tool ca
 evals/cases.py       add your own cases, show what exists
 evals/run_all.py     the scorecard
 data/evals/          synthetic/ (generated) and user/ (yours), git-ignored
-docs/                SETUP, PLATFORMS, EVALS, architecture.md (diagram), VERIFICATION, index.html + session-N-primer.html (slides)
+docs/                SETUP, PLATFORMS, EVALS, architecture.md (diagram), VERIFICATION, BACKLOG, index.html + session-N-primer.html (slides)
 CONTRIBUTING.md      add an OS or a GPU backend with one file
 tests/               plug-in contract tests (stdlib only)
 scripts/             setup.py, doctor.py, smoke_test.py, soak.py (hours of daemon load)

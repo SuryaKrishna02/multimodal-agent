@@ -50,11 +50,11 @@ all of them except autostart, which changes your login items:
 | `hotkey_warning()` | Return a message if the OS will silently drop key events. |
 | `keep_awake()` | Session 2. Stop idle sleep while the daemon runs. Return an object with `.stop()`. The block must end by itself when the process dies. macOS: `caffeinate -i -w <pid>`. |
 | `notify(title, message)` | Session 2. Show a desktop notification. Pass the strings as arguments, never as script text. macOS: `osascript` with `on run argv`. |
-| `install_autostart(label, cmd, cwd, log)` / `uninstall_autostart(label)` | Session 2. Start the daemon at login and after a crash, but not after a clean exit. macOS: a LaunchAgent with `KeepAlive.SuccessfulExit = false`. On Linux, a systemd user unit can do it. |
+| `install_autostart(label, cmd, cwd, log)` / `uninstall_autostart(label)` | Session 2. Start the daemon at login and after a crash, but not after a clean exit. macOS: a LaunchAgent with `KeepAlive.SuccessfulExit = false`. Login and crash restart are verified. launchd runs the daemon through a small app (`.cache/autostart/multimodal-agent.app`, built from `macos_launcher.swift` with `NSMicrophoneUsageDescription`), so the daemon holds the Microphone permission of that app; listening with real speech is verified. The plist also carries the installer's `PATH`. On Linux, a systemd user unit can do it. |
 | `spawn_background(cmd, cwd, log)` | Session 2. Start a detached process (`daemon start`). The default (`start_new_session`) works on macOS and Linux. |
 | `install_hint(tool)` | One line to install a tool such as ffmpeg (`brew install ffmpeg`, `sudo apt install ffmpeg`...). |
 | `venv_python(venv)` | Path to the venv's Python. |
-| facts | `exe_suffix`, `raw_video_suffix`, `monospace_font`, `screen_blank_hint`, `permission_notes()` |
+| facts | `exe_suffix`, `raw_video_suffix`, `monospace_font`, `screen_blank_hint`, `mic_silent_hint`, `permission_notes()` |
 
 ## What each accelerator must do
 

@@ -20,6 +20,7 @@ Object.assign(DESCRIBE, {
   "senses.stt": (e) => `${e.engine === "whisper" ? "Whisper" : "Gemma"} transcribed ${e.audio_s} s in ${e.took_s} s: ${e.text}`,
   "senses.ambient": (e) => `Heard: ${e.text}`,
   "senses.ambient.state": (e) => `Always-on listening ${e.state}${e.device ? ` (${e.device})` : ""}`,
+  "senses.ambient.warning": (e) => `Always-on listening hears only silence${e.device ? ` (${e.device})` : ""}: ${e.message}`,
   "memory.consolidated": (e) => `Summarized ${e.rows} raw rows into ${plural(e.claims.length, "claim")} and ${plural(e.fact_ids.length, "fact")}`,
   "memory.superseded": (e) => `Fact #${e.new} replaces ${e.old.map((i) => "#" + i).join(", ")}`,
   "memory.forgotten": (e) => `Retention: deleted ${plural(e.deleted, "raw row")} that a summary covers`,
@@ -103,8 +104,10 @@ async function refreshDaemon() {
   ]);
   const sw = $("#listen-switch");
   const listening = s.alive && s.listening;
-  sw.className = "mic " + (listening ? "live" : "paused");
-  sw.textContent = listening ? "Always-on listening on" : s.want_listen ? "Listening on (starts with the daemon)" : "Always-on listening off";
+  const silent = listening && s.mic_warning;
+  sw.className = "mic " + (silent ? "recording" : listening ? "live" : "paused");
+  sw.textContent = silent ? "Listening, but the microphone is silent" : listening ? "Always-on listening on" : s.want_listen ? "Listening on (starts with the daemon)" : "Always-on listening off";
+  sw.title = silent ? s.mic_warning : "";
   sw.setAttribute("aria-checked", String(!!s.want_listen));
   $("#daemon-jobs").innerHTML = d.jobs.map(jobRow).join("") || '<div class="none">No jobs yet.</div>';
   $("#daemon-schedule").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Job</th><th>When</th><th>Last slot</th></tr></thead><tbody>${
@@ -141,13 +144,14 @@ function jobResult(e) {
   try { if (JOB_RESULT[e.job]) return JOB_RESULT[e.job](e.summary); } catch { /* an older shape: show the raw fields */ }
   return short(JSON.stringify(e.summary), 200);
 }
-const FEED_KINDS = new Set(["daemon.action", "daemon.missed", "checkpoint.recovered", "daemon.started", "daemon.killed", "memory.forgotten"]);
+const FEED_KINDS = new Set(["daemon.action", "daemon.missed", "checkpoint.recovered", "daemon.started", "daemon.killed", "memory.forgotten",
+  "senses.ambient.warning"]);
 function renderFeed() {
   // Only what the daemon did, or a job you started here: eval runs write to the same log from the CLI.
   const rows = allEvents.filter((e) => FEED_KINDS.has(e.kind) && (e.source === "daemon" || e.source === "dashboard")).slice(-30).reverse();
   $("#daemon-feed").innerHTML = rows.map((e) => `<div class="feed-row"><time>${clock(e.ts)}</time><div><div>${esc(describe(e))}</div>
     ${e.summary ? `<div class="why">${esc(jobResult(e))}</div>` : ""}</div>
-    <span class="tag ${e.status === "failed" || e.kind === "daemon.killed" ? "bad" : e.kind === "daemon.missed" ? "warn" : "plain"}">${esc(e.source || "")}</span></div>`).join("")
+    <span class="tag ${e.status === "failed" || e.kind === "daemon.killed" ? "bad" : e.kind === "daemon.missed" || e.kind.endsWith(".warning") ? "warn" : "plain"}">${esc(e.source || "")}</span></div>`).join("")
     || '<div class="none">Nothing yet. Start the daemon, or press Summarize now in the Memory tab.</div>';
 }
 $("#daemon-start").onclick = (e) => busy(e.target, () => api("/api/daemon/start", {})).then(refreshDaemon);
@@ -258,6 +262,7 @@ $("#replay-btn").onclick = async (e) => {
   const out = await busy(e.target, () => api("/api/task3/replay", { speed: Number($("#replay-speed").value) }));
   if (out) toast(out.queued ? `The daemon is replaying it (job #${out.job_id}). Transcripts appear below as they are heard.` : "Replay done. Now ask about it.");
 };
+renderers["senses.ambient.warning"] = (e) => addNotice("ambient", DESCRIBE["senses.ambient.warning"](e), "warn");
 renderers["senses.ambient"] = (e) => {
   if (!e.text || replaying) return;   // only what is heard from now on, not old runs (evals write here too)
   $("#task3-heard").insertAdjacentHTML("beforeend", `<div><span class="muted">${clock(e.ts)}</span> ${esc(e.text)}${e.memory_id ? "" : ' <span class="tag warn">refused by the junk filter</span>'}</div>`);

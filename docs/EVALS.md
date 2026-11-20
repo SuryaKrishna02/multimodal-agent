@@ -56,7 +56,7 @@ Do not change `config.THRESHOLDS` to make a run pass.
 | `asr` (extended) | component | Word error rate of Gemma 4 and of Whisper on the same clips, median seconds per clip and the real-time factor | each clip goes through both engines, after one untimed warm-up call each |
 | `daemon` | component | Recovery time after a kill, finished steps that ran again (must be 0), lost jobs, memory growth and missed events over hours | a real daemon process on a throwaway runtime folder, killed with SIGKILL |
 | `multimodal` | component | Recall of a screenshot or a clip by a text query, with text vectors, media vectors or both | top 3 and top 1, next to what random ranking scores |
-| `consolidation` | component | Faithfulness of each claim to the rows it cites, invalid citations, compression, recall before and after forgetting | a separate Gemma request judges each claim |
+| `consolidation` | component | Faithfulness of each claim to the rows it cites, invalid citations, compression, recall before and after forgetting | a separate Gemma request judges each claim. Since 2026-11-13 the reply schema lists the allowed row ids, so `invalid_citation_rate` is 0 unless the server stops enforcing the schema |
 | `task3` | end-to-end | Questions about a conversation, hours later: correct answers, "I do not know" when nobody said it, answers that cite memory, and the stage that lost each wrong answer | the recording goes through the same listener as the microphone |
 | `task4` | end-to-end | Preference compliance before and after feedback rounds, on held-out days; regressions; edits to locked blocks; one overfitting example | the simulated user gives feedback on dev days only |
 

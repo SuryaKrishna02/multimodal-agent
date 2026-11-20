@@ -506,6 +506,159 @@ samples, so the `daemon` record warns. A multi-hour soak with the lid open is st
 - **The soak script lost its result when the daemon had died**, because terminating a missing process raised. A sample
   where the daemon is not running now counts as a missed event.
 
+## Before Session 2 (2026-11-13)
+
+### The reply schema lists the allowed citation ids
+
+On E2B, `consolidation.invalid_citation_rate` was 10.5% (limit 5%): the model cited one id from outside the window in
+each synthetic log. The code dropped those ids, so nothing wrong was stored, but the check failed.
+
+`consolidate.reply_schema()` now puts the row ids of the window into the JSON schema as an `enum`. Checked on the
+pinned build (b11960) with E4B, same prompt, "Put every whole number from 40 to 45 into sources":
+
+| Schema of `sources` items | Reply |
+|---|---|
+| `{"type": "integer"}` | 40, 41, 42, 43, 44, 45 |
+| `{"type": "integer", "enum": [41, 43, 105]}` | 41, 43, 43, 43, 43, 43 |
+
+The server enforces the list. It can repeat an id, so `_cited()` now counts the same id one time. `_cited()` still
+drops an id outside the window, as a second check.
+
+`python evals/run_all.py --run consolidation --tier <tier>`, 2 synthetic logs:
+
+| | E4B before | E4B after | E2B before | E2B after |
+|---|---|---|---|---|
+| `invalid_citation_rate` (limit 0.05) | 0.00 | 0.00 | **0.105 (FAIL)** | **0.00** |
+| `faithfulness` (limit 0.90) | 1.00 | 1.00 | 1.00 | 1.00 |
+| `compression_ratio` (limit 1.5) | 1.75 | 1.60 | 1.57 | 1.56 |
+| `facts_per_raw_row` | 0.58 | 0.37 | 0.11 | 0.11 |
+| `recall_after` (limit 0.80) | 0.933 | 0.933 | 1.00 | 1.00 |
+
+The metric is now 0 by construction, so it only shows whether the server still enforces the schema. On E4B the
+compression went from 1.75 to 1.60 and the model wrote fewer facts. We did not find the reason, and one run of 2 logs
+does not separate it from noise. `config.THRESHOLDS` did not change.
+
+**A wrong run, and how we saw it.** The first "E2B" run happened while the dashboard was up. The dashboard's E4B
+server held the port, so `--tier e2b` measured E4B and wrote the result under `e2b`. Both tiers then had the same
+numbers to the last digit, which gave it away. The numbers above are from a run with the dashboard and the daemon
+stopped, and `/props` showed `gemma-4-E2B-it-Q4_0.gguf` during the E2B run. Stop the dashboard before you run an eval
+on another tier (GitHub issue #1 is the same weakness).
+
+**Ids copied into the text.** In a real replay, E4B ended each claim with its ids: "... deposit due Wednesday.
+(22, 23, 24, 25, 26)". `_cited()` now removes a list of numbers at the end of a claim when each number is one of its
+sources. A test covers it, and a number that is not a source stays.
+
+### Chat sessions and the simple view
+
+- Unit tests cover the sessions: a new session starts with no history for the model, an old one opens again, a delete
+  removes one session, an id that is not in our format is refused, and the conversation of an older version
+  (`chat.json`) becomes the first session.
+- In the dashboard with E4B: 4 new sessions were made through `/api/chat` (a note saved with `save_note` and found
+  again, a picture of a failing test, a daily brief with feedback, and questions about the replayed conversation).
+  History listed 5 sessions, one opened with its own messages, and the page had no console error.
+- The reflection on the feedback "Too long. Six bullets at most, please." wrote v2 with the preference "Limit the
+  brief to a maximum of six bullet points." The gate checked 1 stored day and found nothing invented. This is the
+  first live run of the gate outside the eval. v1 was then made active again.
+- The simple view and the Show details switch were looked at on the Serving, Brain, Memory, Evolve and Scorecard tabs.
+  The voice button and a delete from the History list were not tried in the browser.
+
+## Live microphone, launchd and a 1-hour soak (2026-11-14)
+
+M4 24 GB, E4B, Whisper turbo. A person sat at the Mac for the microphone and the login.
+
+### The 1-hour soak
+
+`python scripts/soak.py --hours 1` (result `evals/results/soak/20261114-071851.json`), lid open, on power:
+
+| Metric | Value |
+|---|---|
+| Jobs submitted / failed | 12 / 0 |
+| Missed events (unfinished jobs, missed slots, late heartbeats, down samples) | 0 (0, 0, 0, 0) |
+| Daemon memory | 1.90 GB, flat after the first 5 minutes; peak 1.95 GB |
+| Growth fit | −25.2 MB/h (no leak seen; 1 hour is too short for a leak of a few MB/h) |
+| Peak system memory | 15.6 GB |
+
+The summary says `awake_hours` 0.98 and 1 `asleep_gaps`, but the Mac did not sleep. After the last sample the script
+waited 5 minutes for the last job without sampling, and the sleep check (no sample for 3 minutes) read that wait as a
+gap. So the `daemon` eval warns, because 0.98 is under `SOAK_MIN_HOURS` (1.0). `scripts/soak.py` now keeps sampling
+during the wait. A 7-minute check with the 5-minute wait reads 0 gaps. The 1-hour result file was not changed.
+
+### `daemon install` and launchd
+
+- `python cli.py daemon install` wrote `~/Library/LaunchAgents/com.multimodal-agent.daemon.plist`, and launchd
+  started the daemon at once (`RunAtLoad`).
+- `python cli.py daemon kill`: launchd started a new daemon about 10 s later (`runs = 2`). This is the default
+  launchd throttle.
+- `python cli.py daemon stop`: exit code 0, and launchd did not start it again (`state = not running`).
+- Log out and log in: the old daemon emitted `daemon.stopped` at 08:33:22. launchd started a new one at 08:33:41 in
+  the new session (`daemon.started`, models loaded, nothing to recover).
+
+The daemon has no lock against a second copy. Stop a daemon that `daemon start` started before you run
+`daemon install`, or two daemons share `data/runtime/`.
+
+### The live microphone
+
+**A daemon that launchd starts hears only silence.** `listen on` opened the "MacBook Air Microphone" and emitted
+`senses.ambient.state listening`, but in 2 minutes of speech the VAD found nothing. macOS showed no permission
+dialog, and Python is not in System Settings > Privacy & Security > Microphone. macOS gives a process with no
+Microphone permission silent audio instead of an error, so the listener cannot tell this apart from a quiet room.
+
+**A daemon started from a terminal app with the permission works.** `daemon start` from Claude Code (which has the
+permission), then `listen on`, then 90 s of real speech: 12 utterances of 2.7 to 11.1 s. Whisper took 0.93 to 1.08 s
+for each one. Each one was stored as a `transcript` row with its audio. The text was close to what was said, with one
+small Whisper error in 12 utterances.
+
+## The Microphone permission for the launchd daemon (2026-11-14)
+
+M4 MacBook Air, macOS 27.2.1, E4B, Whisper turbo. A person sat at the Mac, answered the macOS dialog and spoke.
+
+**What Apple documents.** `NSMicrophoneUsageDescription` is the Info.plist key that an app that uses the microphone
+must have (macOS 10.14 and later). `AVCaptureDevice.authorizationStatus(for:)` and
+`requestAccess(for:completionHandler:)` read the permission and show the dialog once; the system remembers the answer
+("Requesting authorization to capture and save media"). `AssociatedBundleIdentifiers` in a LaunchAgent plist names
+the app that System Settings > Login Items shows (`man launchd.plist`). Apple does not document how macOS picks the
+process whose permission counts for a child process. The result below is measured, not documented.
+
+**The fix.** `install_autostart` builds `.cache/autostart/multimodal-agent.app`: an Info.plist with
+`NSMicrophoneUsageDescription` and `LSUIElement`, an executable compiled with `swiftc` from
+`agent/platforms/macos_launcher.swift`, and an ad-hoc signature (`codesign --sign -`). The LaunchAgent runs that
+executable with the daemon command as its arguments. The launcher calls `requestAccess` without waiting for the
+answer, starts Python as a child, forwards SIGTERM, SIGINT and SIGHUP to it, and exits with its exit code
+(128 + the signal number after a kill). macOS knows an ad-hoc signed app by its code hash, so the app is rebuilt only
+when its source or Info.plist changes; a rebuilt app asks again.
+
+**Before: launchd runs Python directly.** A probe in a throwaway LaunchAgent recorded 4 s: RMS 0.0, 100% exact zeros.
+The same probe through a test app built the same way: RMS 0.0020 (the quiet room; from Claude Code it measured 0.0019
+to 0.0021).
+
+**The warning on real silent audio.** `ambient.Listener` in a LaunchAgent that runs Python directly emitted
+`senses.ambient.state listening` (MacBook Air Microphone), then `senses.ambient.warning` with the macOS hint
+(`mic_silent_hint`), 5 s after the stream opened.
+
+**After: `daemon install` with the launcher.**
+
+- launchd started the launcher (pid 16000), and the launcher started Python (pid 16003, parent 16000). The log said
+  `launcher: microphone permission not determined`. macOS showed the dialog for "multimodal-agent". The person clicked
+  Allow, and the log said `launcher: microphone permission authorized in the dialog`.
+- `listen on`, then real speech for about a minute: 4 utterances of 0.8 to 15.3 s. Whisper took 0.93 to 1.14 s for
+  each one. 3 were stored as `transcript` rows (memories 50 to 52); the junk filter refused the 0.8 s "Mm-hmm".
+  The transcripts are whole, sensible sentences; nobody checked them word by word against what was said. No
+  `senses.ambient.warning`, and `daemon status` showed `mic_warning: null`.
+- `daemon kill` (SIGKILL to Python): the launcher exited with code 137, and launchd started a new launcher and Python
+  (`runs = 2`). The log said `microphone permission authorized`, with no second dialog.
+- `daemon stop`: exit code 0, and launchd did not start it again (`state = not running`).
+- `daemon install` again (same source, so no rebuild): `microphone permission authorized`, with no dialog.
+
+**`PATH` in the LaunchAgent.** `python cli.py smoke` against the server of the launchd daemon failed the video check
+(400). The server log said `ffprobe failed on buffer (is ffprobe in PATH?)`: launchd starts the daemon, and so its
+`llama-server`, with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and ffprobe is in `/opt/homebrew/bin`. This was so before
+the launcher too. The plist now has `EnvironmentVariables.PATH` from the shell that runs `daemon install`. After a new
+`daemon install`, the new server's `PATH` has `/opt/homebrew/bin`, and `smoke` passed all 5 checks (video 3.3 s,
+server memory 5.7 GB).
+
+Not tried: a log out and log in with the launcher (the launcher changes only what launchd runs, not when), and a
+"Don't Allow" answer (the warning covers it, as the probe above shows).
+
 ## Not verified yet
 
 - Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool
@@ -514,11 +667,10 @@ samples, so the `daemon` record warns. A multi-hour soak with the lid open is st
 - Mic recording and the global hotkey need permissions that only you can grant. Please try
   `cli.py note` and the hotkey once you grant the permissions.
 - Memory use with a Google Meet call running alongside.
-- Session 2, live microphone: the always-on `Listener` with a real microphone. Only replays of recordings were tested.
-- Session 2, `daemon install` (launchd): the plist and the commands are written but were not run, because they change
-  your login items. It is also unknown whether a process that launchd starts gets the Microphone permission.
+- Session 2, the launcher app over a log out and log in, and the "Don't Allow" answer (see "The Microphone permission
+  for the launchd daemon"). Listening with real speech in a daemon that launchd starts is verified.
 - Session 2, notifications: `osascript` exited with code 0, but nobody looked at the screen to see the notification.
-- Session 2, a soak of several hours while the machine stays awake: the longest awake stretch so far is 0.23 h
-  (see "The soak and a sleeping Mac").
+- Session 2, a soak of several hours: the longest awake run is 1 h (see "Live microphone, launchd and a 1-hour soak").
+  A memory leak of a few MB per hour shows only over 3 hours or more.
 - The voice button of the dashboard chat with a real microphone: a unit test covers it with a mocked microphone. The
   picture and the daily brief in the chat were tried in the dashboard with E4B.

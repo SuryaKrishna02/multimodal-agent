@@ -22,6 +22,7 @@
     <span class="stat" title="Language model server. It reads text, images and audio."><i id="llm-dot" class="dot"></i>Language model <span id="llm-mem" class="muted"></span></span>
     <span class="stat" title="Embedding server. It powers memory search."><i id="emb-dot" class="dot"></i>Embeddings <span id="emb-mem" class="muted"></span></span>
     <button id="mic-switch" class="mic" role="switch" aria-checked="true" title="Pause or allow the microphone everywhere. The agent only records when you press Record.">Mic ready</button>
+    <button id="detail-switch" class="small" role="switch" aria-checked="false" title="Show or hide the extra cards, tables and explanations on every tab (key D)">Show details</button>
     <button id="chat-toggle" class="small" aria-controls="chat" title="Show or hide the chat (key C)">Hide chat</button>
   </div>
 </header>
@@ -64,13 +65,13 @@
         <div id="serving-info" class="servers"></div>
         <p class="hint">E2B is the smaller model: it uses less memory and replies faster. Switch with the Model menu at the top.
           The memory number can drop while a model is idle. That is normal.</p>
-        <details class="more" id="serving-cmd" hidden><summary>How the servers were started</summary><div id="serving-cmd-body"></div></details>
+        <details class="more detail" id="serving-cmd" hidden><summary>How the servers were started</summary><div id="serving-cmd-body"></div></details>
       </div>
 
       <div class="card"><h3>Speed test <button id="bench-btn" class="primary small head-action" data-busy="Measuring…">Run benchmark</button></h3>
         <p class="hint">Sends one fixed prompt to the language model and measures how fast the reply comes back.</p>
         <div id="bench-latest" class="tiles"></div>
-        <div class="table-wrap"><table id="bench-table"><thead><tr><th>Time</th><th>Model</th><th class="num">First token</th>
+        <div class="table-wrap detail"><table id="bench-table"><thead><tr><th>Time</th><th>Model</th><th class="num">First token</th>
           <th class="num">Writing speed</th><th class="num">Reading speed</th><th class="num">Memory</th></tr></thead><tbody></tbody></table></div>
         <div class="empty-note">No benchmarks yet. Press "Run benchmark".</div></div>
     </div>
@@ -107,7 +108,7 @@
               <span id="turn-pos" class="muted"></span>
               <button id="turn-next" class="small" aria-label="Later message">Later ›</button></div></div>
           <p id="turn-title" class="turn-title"></p>
-          <p class="hint turn-from"><span id="turn-from"></span>
+          <p class="hint keep turn-from"><span id="turn-from"></span>
             <label class="field" for="turn-source">Show <select id="turn-source" title="Evals, the command line and the daemon write model requests to the same log">
               <option value="dashboard">only what I sent from this dashboard</option>
               <option value="all">everything, with evals and daemon jobs</option></select></label></p>
@@ -115,9 +116,9 @@
         <div class="card"><h3>Context budget</h3>
           <p class="hint">The model has a fixed amount of room. This is how much the message used, and what filled it.</p>
           <div id="budget"></div></div>
-        <div class="card"><h3>Request sent to the model <span id="req-label" class="muted"></span></h3>
+        <div class="card detail"><h3>Request sent to the model <span id="req-label" class="muted"></span></h3>
           <div id="last-request"></div></div>
-        <div class="card"><h3>Reply from the model</h3><div id="last-reply"></div></div>
+        <div class="card detail"><h3>Reply from the model</h3><div id="last-reply"></div></div>
       </div>
     </div>
 
@@ -139,7 +140,7 @@
           <span class="head-action"><select id="mem-level" aria-label="Show level"><option value="">All levels</option><option value="raw">Raw</option><option value="summary">Summaries</option><option value="fact">Facts</option></select>
           <button id="mem-clear" class="small danger">Clear all</button></span></h3>
         <div id="mem-all"></div></div>
-      <div class="card"><h3>Refused by the junk filter</h3>
+      <div class="card detail"><h3>Refused by the junk filter</h3>
         <p class="hint">Things the agent chose not to keep, with the reason.</p>
         <div id="mem-rejected"></div></div>
     </div>
@@ -158,7 +159,7 @@
         <div class="table-wrap scroll-y"><table id="tool-calls"><thead><tr><th>Time</th><th>Tool</th><th>Arguments</th>
           <th>Status</th><th>Result or reason</th></tr></thead><tbody></tbody></table></div>
         <div class="empty-note">No tool calls yet. Try asking the chat "What time is it?".</div></div>
-      <div class="card"><h3>Available tools</h3>
+      <div class="card detail"><h3>Available tools</h3>
         <p class="hint"><span class="tag plain">guarded</span> means an extra check also reads the arguments of each call.</p>
         <div class="table-wrap"><table id="tool-list"><thead class="sr-only"><tr><th>Tool</th><th>Checks</th><th>What it does</th></tr></thead><tbody></tbody></table></div></div>
     </div>
@@ -187,7 +188,7 @@
       <div class="card"><h3>Jobs and checkpoints</h3>
         <p class="hint">Open a job to see the three rows of each step.</p>
         <div id="daemon-jobs"></div></div>
-      <div class="card"><h3>Schedule</h3><div id="daemon-schedule"></div></div>
+      <div class="card detail"><h3>Schedule</h3><div id="daemon-schedule"></div></div>
     </div>
 
     <div class="panel" id="panel-evolve" role="tabpanel">
@@ -204,13 +205,13 @@
       <div class="card"><h3>Active prompt <span id="evolve-version" class="muted"></span><span id="evolve-locked" class="head-action"></span></h3>
         <div id="evolve-prompt"></div></div>
       <div class="card"><h3>Versions <span class="head-action"><button id="reflect-btn" class="small primary" data-busy="Reflecting…">Reflect on feedback now</button></span></h3>
-        <p class="hint" id="evolve-pending"></p>
+        <p class="hint keep" id="evolve-pending"></p>
         <div id="evolve-versions"></div></div>
       <div class="card" id="evolve-diff-card" hidden><h3>What changed <span id="evolve-diff-label" class="muted"></span></h3><div id="evolve-diff"></div></div>
-      <div class="card"><h3>Refused patches</h3>
+      <div class="card detail"><h3>Refused patches</h3>
         <p class="hint">A patch that fails the validator or the gate makes no version. The active prompt stays as it was.</p>
         <div id="evolve-refused"></div></div>
-      <div class="card"><h3>Feedback</h3><p class="hint">"simulated" rows come from the code-checkable user of the Task 4 eval, never from a person.</p>
+      <div class="card detail"><h3>Feedback</h3><p class="hint">"simulated" rows come from the code-checkable user of the Task 4 eval, never from a person.</p>
         <div id="evolve-feedback"></div></div>
     </div>
 
@@ -258,9 +259,13 @@
   </section>
 
   <aside id="chat" aria-label="Chat">
-    <div class="chat-head"><h2>Chat</h2>
-      <span class="chat-head-note muted" title="Saved on this machine in data/runtime/chat.json">Kept on this device</span>
-      <button id="chat-clear" class="small" disabled title="Forget this conversation and its pictures. Long-term memories stay." data-busy="Clearing…">Clear chat</button></div>
+    <div class="chat-head"><h2 id="chat-title">Chat</h2>
+      <button id="chat-history" class="small" aria-expanded="false" aria-controls="chat-sessions" title="Earlier chats, saved on this device">History</button>
+      <button id="chat-new" class="small" disabled title="Start a new chat. This one stays in History. Long-term memories are shared by all chats.">New chat</button></div>
+    <div id="chat-sessions" hidden>
+      <p class="hint">Each chat has its own conversation. All chats share the same long-term memory.</p>
+      <div id="chat-session-list"></div>
+    </div>
     <div id="chat-empty">
       <p>Ask anything. Type, speak, paste a picture or share your screen. The agent recalls your memories and can use tools.</p>
       <div class="suggest">

@@ -87,6 +87,11 @@ STT_LANGUAGE = "en"  # Whisper language code; None = detect it per clip (slower,
 WHISPER_DIR = MODELS / "whisper-large-v3-turbo"  # downloaded by scripts/setup.py (pins in agent/accel/<name>.py)
 AMBIENT_STEP_S = 1.0  # the listener looks for a finished sentence this often
 AMBIENT_IDLE_KEEP_S = 1.0  # audio kept from a stretch with no speech, so the start of a word is not lost
+# Silent microphone: an OS that blocks the microphone can deliver zeros instead of an error. If every block of the
+# first AMBIENT_SILENT_S seconds after the stream opens has an RMS under AMBIENT_SILENT_RMS (float32 full scale = 1.0),
+# the listener emits `senses.ambient.warning`. Measured on an M4 MacBook Air: quiet room ~2e-3, blocked stream 0.0.
+AMBIENT_SILENT_RMS = 1e-5
+AMBIENT_SILENT_S = 5.0
 
 # --- Daemon, checkpoints, schedule (Session 2) -------------------------------
 CHECKPOINT_DB = RUNTIME / "checkpoints.sqlite"
@@ -105,6 +110,10 @@ SCHEDULE = {
 TRANSCRIPTS_PER_SUMMARY = 20  # trigger: summarize early when this many new transcript rows wait
 NOTIFY_JOBS = ("brief",)  # jobs whose result also shows a desktop notification
 AUTOSTART_LABEL = "com.multimodal-agent.daemon"  # name of the login item that starts the daemon
+# A helper that a platform's login item needs, if any (macOS: an .app that holds the Microphone permission for the
+# daemon). Rebuilt only when its source changes, because a rebuilt helper must ask for the permission again.
+AUTOSTART_DIR = CACHE / "autostart"
+AUTOSTART_STOP_WAIT_S = 30.0  # wait for the old daemon to exit before launchd loads a new copy
 
 # --- Self-evolution (Session 2) ----------------------------------------------
 EVOLVE_DB = RUNTIME / "evolve.sqlite"
@@ -118,9 +127,11 @@ WORKSPACE = Path(os.environ.get("AGENT_WORKSPACE", ROOT / "data" / "workspace"))
 
 # --- Interfaces --------------------------------------------------------------
 DASHBOARD_PORT = 8765
-CHAT_FILE = RUNTIME / "chat.json"  # the dashboard chat, kept over a restart; Clear chat empties it
+CHAT_DIR = RUNTIME / "chats"  # the dashboard chat sessions, one JSON file each, kept over a restart
+CHAT_FILE = RUNTIME / "chat.json"  # the one conversation of older versions; it becomes the first session
+CHAT_TITLE_CHARS = 60  # a session is named after the start of its first message
 CHAT_HISTORY_MESSAGES = 6  # earlier chat messages sent with each request (the budget may drop more)
-CHAT_KEEP = 200  # messages kept in CHAT_FILE; older ones are dropped
+CHAT_KEEP = 200  # messages kept in one session; older ones are dropped
 CHAT_IMAGE_MAX_BYTES = 20_000_000  # a picture pasted or dropped into the chat
 HOTKEY = "<ctrl>+<alt>+<space>"  # pynput syntax; "look at my screen and help"
 

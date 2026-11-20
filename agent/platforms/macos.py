@@ -1,13 +1,20 @@
 """macOS (Apple Silicon and Intel): the reference plug-in. Verified on macOS 27 / M4."""
 
+import hashlib
 import importlib
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+from agent import config
 from agent.platforms.base import Platform
+
+APP_NAME = "multimodal-agent"  # the name that System Settings > Privacy & Security > Microphone shows
+LAUNCHER_SOURCE = Path(__file__).with_name("macos_launcher.swift")
 
 
 class _Background:
@@ -30,6 +37,67 @@ def _agents_dir() -> Path:
     return Path.home() / "Library" / "LaunchAgents"
 
 
+def _bootout(target: str) -> None:
+    """Unload a LaunchAgent and wait until its process is gone, or `bootstrap` of a new copy fails (code 5).
+
+    launchd sends SIGTERM, and SIGKILL after its exit timeout (20 s by default).
+    """
+    subprocess.run(["launchctl", "bootout", target], capture_output=True)
+    deadline = time.monotonic() + config.AUTOSTART_STOP_WAIT_S
+    while time.monotonic() < deadline:
+        if subprocess.run(["launchctl", "print", target], capture_output=True).returncode != 0:
+            return
+        time.sleep(0.5)
+
+
+def _app_info(bundle_id: str) -> dict:
+    return {
+        "CFBundleExecutable": APP_NAME,
+        "CFBundleIdentifier": bundle_id,
+        "CFBundleName": APP_NAME,
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "LSUIElement": True,  # no Dock icon and no menu bar
+        "NSMicrophoneUsageDescription": "Always-on listening: the daemon transcribes what it hears into local memory.",
+    }
+
+
+def build_launcher(bundle_id: str, folder: Path = config.AUTOSTART_DIR) -> Path:
+    """Build the small app that launchd runs, so the daemon holds the Microphone permission of the app.
+
+    macOS gives a process without the permission silent audio, and a Python that launchd starts has none.
+    The app has `NSMicrophoneUsageDescription`, asks for the permission once, and runs the daemon as its child.
+    It is ad-hoc signed, so macOS knows it by its code hash: the app is rebuilt only when its source or
+    Info.plist changes, because a rebuilt app must ask for the permission again.
+
+    Args:
+        bundle_id (str): The bundle identifier, the same as the LaunchAgent label.
+        folder (Path, optional): Where the app goes. Defaults to `config.AUTOSTART_DIR`.
+
+    Returns:
+        Path: The executable inside the app.
+
+    Raises:
+        RuntimeError: `swiftc` is missing (it comes with the Xcode Command Line Tools).
+    """
+    app = folder / f"{APP_NAME}.app"
+    exe, stamp = app / "Contents" / "MacOS" / APP_NAME, app / "Contents" / "Resources" / "source.sha256"
+    info = plistlib.dumps(_app_info(bundle_id))
+    digest = hashlib.sha256(LAUNCHER_SOURCE.read_bytes() + info).hexdigest()
+    if exe.exists() and stamp.exists() and stamp.read_text() == digest:
+        return exe
+    if not shutil.which("swiftc"):
+        raise RuntimeError("swiftc not found: install the Xcode Command Line Tools with `xcode-select --install`.")
+    shutil.rmtree(app, ignore_errors=True)
+    exe.parent.mkdir(parents=True)
+    stamp.parent.mkdir(parents=True)
+    (app / "Contents" / "Info.plist").write_bytes(info)
+    subprocess.run(["swiftc", "-O", "-o", str(exe), str(LAUNCHER_SOURCE)], check=True, capture_output=True)
+    subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True, capture_output=True)
+    stamp.write_text(digest)
+    return exe
+
+
 class MacOS(Platform):
     """macOS plug-in: screencapture, say, caffeinate, notifications, launchd and Accessibility-gated hotkeys."""
 
@@ -40,6 +108,12 @@ class MacOS(Platform):
     screen_blank_hint = (
         "Screenshot is blank: grant Screen Recording to your terminal app "
         "(System Settings > Privacy & Security > Screen Recording)."
+    )
+    mic_silent_hint = (
+        "The microphone delivers only silence. macOS gives silent audio to a process without the Microphone "
+        "permission. A daemon from `daemon start` uses the permission of your terminal app. A daemon that launchd "
+        f"starts (`daemon install`) uses the '{APP_NAME}' app: allow it in System Settings > Privacy & Security > "
+        "Microphone, then run `python cli.py daemon install` again."
     )
 
     @classmethod
@@ -114,6 +188,9 @@ class MacOS(Platform):
         """Write a LaunchAgent and load it, so launchd starts `cmd` at login and after a crash.
 
         `KeepAlive.SuccessfulExit = False` restarts the process only when it exits with an error or is killed.
+        launchd runs `cmd` through the app of `build_launcher`, so the daemon can hold the Microphone permission.
+        The first start asks for the permission in a macOS dialog.
+        The daemon gets the PATH of the shell that installs it, so it finds the tools that this shell finds.
 
         Args:
             label (str): The LaunchAgent label, also the file name.
@@ -128,7 +205,10 @@ class MacOS(Platform):
         plist.parent.mkdir(parents=True, exist_ok=True)
         spec = {
             "Label": label,
-            "ProgramArguments": cmd,
+            "ProgramArguments": [str(build_launcher(label)), *cmd],
+            "AssociatedBundleIdentifiers": label,  # System Settings > Login Items shows the app, not "python"
+            # launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin, so llama-server would not find a Homebrew ffprobe
+            "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")},
             "WorkingDirectory": str(cwd),
             "RunAtLoad": True,
             "KeepAlive": {"SuccessfulExit": False},
@@ -137,7 +217,7 @@ class MacOS(Platform):
         }
         plist.write_bytes(plistlib.dumps(spec))
         domain = f"gui/{os.getuid()}"
-        subprocess.run(["launchctl", "bootout", f"{domain}/{label}"], capture_output=True)  # an old copy, if any
+        _bootout(f"{domain}/{label}")  # an old copy, if any
         subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=True, capture_output=True)
         return plist
 
@@ -151,7 +231,7 @@ class MacOS(Platform):
             bool: False if no plist existed.
         """
         plist = _agents_dir() / f"{label}.plist"
-        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"], capture_output=True)
+        _bootout(f"gui/{os.getuid()}/{label}")
         if not plist.exists():
             return False
         plist.unlink()
@@ -178,7 +258,7 @@ class MacOS(Platform):
             list[tuple[str, str]]: (permission, what it is for) pairs.
         """
         return [
-            ("Microphone", "recording voice notes"),
+            ("Microphone", "voice notes; the daemon that launchd starts asks for it as the 'multimodal-agent' app"),
             ("Screen Recording", "Task 2, screen videos, screen evals"),
             ("Accessibility + Input Monitoring", "the global hotkey"),
             ("Notifications", "daemon notifications through osascript; allow the app that Settings lists"),

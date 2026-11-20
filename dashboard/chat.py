@@ -4,17 +4,24 @@
     POST /api/chat/voice/start   open the microphone for a spoken message
     POST /api/chat/voice/stop    close it, keep only the speech (VAD) and turn it into text (config.STT_ENGINE)
     POST /api/chat/brief         put a daily brief into the conversation, so you can rate it and ask about it
+    GET  /api/chat/sessions      the saved conversations, newest first
+    POST /api/chat/new           start a new conversation; the old one stays in the list
+    POST /api/chat/open          continue a saved conversation
+    POST /api/chat/delete        delete one conversation and its pictures
 
 Each message has `role` and `content`, which the model reads back as history, and `ui`, which only the page
-reads: pictures, the voice transcript, recalled memories, tool calls and timings. The conversation is saved
-in config.CHAT_FILE after every change, so it survives a restart of the dashboard. Long-term memory is
-separate: Clear chat empties the conversation and deletes its pictures, and keeps every memory.
+reads: pictures, the voice transcript, recalled memories, tool calls and timings. A session is one conversation.
+It is saved in config.CHAT_DIR after every change, so it survives a restart of the dashboard. The model reads
+only the messages of the open session. Long-term memory is separate and shared by all sessions: deleting a
+session deletes its messages and its pictures, and keeps every memory.
 """
 
 import base64
 import binascii
 import io
 import json
+import re
+import secrets
 import threading
 import time
 from pathlib import Path
@@ -29,60 +36,227 @@ from agent.senses import audio, screen, stt
 router = APIRouter(prefix="/api")
 # Held while the model replies, so an approval during a reply cannot put its outcome before that turn in the history.
 lock = threading.Lock()
-state: dict = {"history": None, "mic": None}  # history is read from CHAT_FILE on first use
+state: dict = {"session": None, "mic": None}  # the open session is read from CHAT_DIR on first use
+SESSION_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")  # an id is part of a file name: accept only our own format
+
+
+# --- Sessions --------------------------------------------------------------------------------
+
+
+def _new_session(messages: list[dict] | None = None) -> dict:
+    now = time.time()
+    sid = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
+    return {"id": sid, "created": now, "updated": now, "messages": messages or []}
+
+
+def _read(path: Path) -> dict | None:
+    """Read one session file. A missing file, or one cut short by a crash, is no session."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("messages"), list) else None
+
+
+def _stored() -> list[dict]:
+    """Return every saved session, newest first."""
+    found = [s for p in config.CHAT_DIR.glob("*.json") if (s := _read(p))]
+    return sorted(found, key=lambda s: s["updated"], reverse=True)
+
+
+def _legacy() -> list[dict]:
+    """Return the one conversation that older versions kept in CHAT_FILE."""
+    try:
+        data = json.loads(config.CHAT_FILE.read_text())
+    except (OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _save(s: dict) -> None:
+    """Write one session to its file. An empty session leaves no file."""
+    if not s["messages"]:
+        return
+    config.CHAT_DIR.mkdir(parents=True, exist_ok=True)
+    path = config.CHAT_DIR / f"{s['id']}.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(s, default=str))
+    tmp.replace(path)  # atomic: a crash leaves the old file or the new one, never half of one
+
+
+def _delete(s: dict) -> None:
+    """Delete one session: its file, and the pictures that its messages hold."""
+    for m in s["messages"]:
+        for p in m.get("ui", {}).get("images", []):
+            if Path(p).resolve().is_relative_to(screen.CAPTURES.resolve()):
+                Path(p).unlink(missing_ok=True)
+    (config.CHAT_DIR / f"{s['id']}.json").unlink(missing_ok=True)
+
+
+def session() -> dict:
+    """Return the open session, reading the newest one from disk the first time.
+
+    Returns:
+        dict: `id`, `created`, `updated` and `messages`.
+    """
+    if state["session"] is None:
+        saved = _stored()
+        state["session"] = saved[0] if saved else _new_session(_legacy())
+        _save(state["session"])
+    return state["session"]
+
+
+def title(s: dict) -> str:
+    """Name a session after the start of its first message.
+
+    Args:
+        s (dict): A session.
+
+    Returns:
+        str: The title.
+    """
+    for m in s["messages"]:
+        if m["role"] == "user":
+            return m["content"][: config.CHAT_TITLE_CHARS]
+    return "Daily brief" if s["messages"] else "New chat"
+
+
+def _summary(s: dict) -> dict:
+    return {
+        "id": s["id"],
+        "title": title(s),
+        "updated": s["updated"],
+        "messages": sum(1 for m in s["messages"] if not m.get("approval")),
+        "current": s["id"] == session()["id"],
+    }
+
+
+@router.get("/chat/sessions")
+def chat_sessions():
+    """List the saved sessions, newest first.
+
+    Returns:
+        list[dict]: `id`, `title`, `updated`, `messages` (how many) and `current` for each session.
+    """
+    return [_summary(s) for s in _stored()]
+
+
+@router.post("/chat/new")
+def chat_new():
+    """Start a new, empty session. The session that was open stays in the list.
+
+    Returns:
+        dict: The `id` of the new session.
+    """
+    with lock:
+        state["session"] = _new_session()
+    return {"id": state["session"]["id"]}
+
+
+def _find(body: dict) -> dict:
+    """Return the saved session that the request names, or raise 404."""
+    sid = str(body.get("id", ""))
+    found = _read(config.CHAT_DIR / f"{sid}.json") if SESSION_ID.match(sid) else None
+    if found is None:
+        raise HTTPException(404, "That chat is not there any more.")
+    return found
+
+
+@router.post("/chat/open")
+def chat_open(body: dict):
+    """Continue a saved session. The model then reads the messages of that session only.
+
+    Args:
+        body (dict): JSON with the `id` of the session.
+
+    Returns:
+        list[dict]: Its messages, oldest first.
+
+    Raises:
+        HTTPException: 404 if no session has that id.
+    """
+    with lock:
+        state["session"] = _find(body)
+    return state["session"]["messages"]
+
+
+@router.post("/chat/delete")
+def chat_delete(body: dict):
+    """Delete one session and its pictures. Long-term memories stay. Deleting the open session starts a new one.
+
+    Args:
+        body (dict): JSON with the `id` of the session.
+
+    Returns:
+        list[dict]: The sessions that are left, as `chat_sessions` lists them.
+
+    Raises:
+        HTTPException: 404 if no session has that id.
+    """
+    with lock:
+        gone = _find(body)
+        _delete(gone)
+        if gone["id"] == session()["id"]:
+            state["session"] = _new_session()
+    return chat_sessions()
 
 
 # --- The conversation --------------------------------------------------------------------
 
 
 def history() -> list[dict]:
-    """Return the conversation, oldest first, reading it from disk the first time.
+    """Return the messages of the open session, oldest first.
 
     Returns:
         list[dict]: Messages with `role`, `content` and optional `ui` or `approval`.
     """
-    if state["history"] is None:
-        try:
-            data = json.loads(config.CHAT_FILE.read_text())
-        except (OSError, ValueError):  # no file yet, or a file cut short by a crash: start empty
-            data = []
-        state["history"] = data if isinstance(data, list) else []
-    return state["history"]
+    return session()["messages"]
 
 
 def append(*messages: dict) -> None:
-    """Add messages to the conversation and save it. Hold `lock` when the order of messages matters.
+    """Add messages to the open session and save it. Hold `lock` when the order of messages matters.
 
     Args:
         *messages (dict): Messages with `role` and `content`.
     """
-    h = history()
-    h.extend(messages)
-    del h[: -config.CHAT_KEEP]
-    config.CHAT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = config.CHAT_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(h, default=str))
-    tmp.replace(config.CHAT_FILE)  # atomic: a crash leaves the old file or the new one, never half of one
+    s = session()
+    s["messages"].extend(messages)
+    del s["messages"][: -config.CHAT_KEEP]
+    s["updated"] = time.time()
+    _save(s)
+
+
+def _session_of_call(call_id: int) -> dict:
+    """Return the session whose reply holds a tool call: the open one, or a saved one you left since."""
+    for s in [session(), *_stored()]:
+        if any(c.get("call_id") == call_id for m in s["messages"] for c in m.get("ui", {}).get("tool_calls", [])):
+            return s
+    return session()
 
 
 def note_approval(call_id: int, outcome: dict) -> None:
     """Record how a call that waited for approval ended: a note for the model, and the new status on its chip.
+
+    The note goes to the session that asked for the call, also when another session is open now.
 
     Args:
         call_id (int): The call.
         outcome (dict): The result of `tools.approve`.
     """
     with lock:
-        for m in history():
+        s = _session_of_call(call_id)
+        for m in s["messages"]:
             for c in m.get("ui", {}).get("tool_calls", []):
                 if c.get("call_id") == call_id:
                     c["status"] = outcome["status"]
-        append({**brain.approval_note(outcome), "approval": outcome})
+        s["messages"].append({**brain.approval_note(outcome), "approval": outcome})
+        s["updated"] = time.time()
+        _save(s)
 
 
 @router.get("/chat")
 def chat_history():
-    """List the conversation, so a reload, or a restart, shows the same one the model still has.
+    """List the open session, so a reload, or a restart, shows the same one the model still has.
 
     Returns:
         list[dict]: Messages, oldest first.
@@ -92,18 +266,14 @@ def chat_history():
 
 @router.post("/chat/clear")
 def chat_clear():
-    """Start a new conversation and delete the pictures it holds. Long-term memories stay.
+    """Delete the open session and its pictures, and start a new one. Long-term memories stay.
 
     Returns:
         list: An empty list.
     """
     with lock:
-        for m in history():
-            for p in m.get("ui", {}).get("images", []):
-                if Path(p).resolve().is_relative_to(screen.CAPTURES.resolve()):
-                    Path(p).unlink(missing_ok=True)
-        state["history"] = []
-        append()
+        _delete(session())
+        state["session"] = _new_session()
     return []
 
 

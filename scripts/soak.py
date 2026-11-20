@@ -138,9 +138,11 @@ def main() -> None:
     pid = start_daemon()
     t0, samples, submitted, next_replay = time.time(), [], [], 0.0
     wav = str(config.EVAL_SYNTHETIC / "task3" / "conversation.wav")
+    load_end = t0 + a.hours * 3600
+    end = load_end + min(300, a.every)  # let the last job finish; keep sampling, or the wait reads as a sleep gap
     try:
-        while time.time() - t0 < a.hours * 3600:
-            if time.time() >= next_replay:
+        while time.time() < end:
+            if time.time() < load_end and time.time() >= next_replay:
                 args = {"path": wav, "start_ts": time.time(), "speed": 0}
                 submitted.append(checkpoint.submit("replay", args, reason="soak load"))
                 next_replay = time.time() + a.every
@@ -148,7 +150,6 @@ def main() -> None:
             s = samples[-1]
             print(f"{s['t_s'] / 60:6.1f} min  daemon {s['daemon_mb']} MB  queued {s['queued']}  alive {s['alive']}")
             time.sleep(60)
-        time.sleep(min(300, a.every))  # let the last job finish
     finally:
         if psutil.pid_exists(pid):  # a daemon that died is the finding: still write the result
             psutil.Process(pid).terminate()

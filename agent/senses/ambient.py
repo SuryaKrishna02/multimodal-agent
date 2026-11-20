@@ -7,6 +7,8 @@ hears VAD_MIN_SILENCE_S of silence after it, or when it reaches MAX_CHUNK_S.
 The live microphone (`Listener`) and the replay of a recording (`replay`) feed the same Segmenter,
 so a replayed recording produces exactly the utterances that live listening would.
 The pause switch (`audio.paused()`) closes the microphone itself, not only the processing.
+Some operating systems give a process without the Microphone permission silent audio instead of an error.
+`SilenceCheck` notices that right after the stream opens and emits `senses.ambient.warning`.
 """
 
 import queue
@@ -18,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 
-from agent import config, events
+from agent import config, events, platforms
 from agent.senses import audio, stt
 
 SR = config.SAMPLE_RATE
@@ -74,6 +76,43 @@ class Segmenter:
     def _drop(self, seconds: float) -> None:
         self.buf = self.buf[int(seconds * SR) :]
         self.t0 += seconds
+
+
+class SilenceCheck:
+    """Notice a microphone stream that delivers only silence right after it opens.
+
+    Attributes:
+        silent_s (float): Seconds of silent audio seen so far.
+        done (bool): The check has decided: the stream is silent, or it delivered sound.
+    """
+
+    def __init__(self, seconds: float = config.AMBIENT_SILENT_S, rms: float = config.AMBIENT_SILENT_RMS):
+        """Start a check for a stream that has just opened.
+
+        Args:
+            seconds (float, optional): Silent seconds before the stream counts as blocked. Defaults to AMBIENT_SILENT_S.
+            rms (float, optional): A block with a lower RMS is silent. Defaults to AMBIENT_SILENT_RMS.
+        """
+        self.seconds, self.rms = seconds, rms
+        self.silent_s, self.done = 0.0, False
+
+    def feed(self, samples: np.ndarray) -> bool:
+        """Look at the next block of audio.
+
+        Args:
+            samples (np.ndarray): The next 16 kHz mono float32 samples.
+
+        Returns:
+            bool: True once, for the block that completes `seconds` of silence. False after any block with sound.
+        """
+        if self.done or not len(samples):
+            return False
+        if float(np.sqrt(np.mean(np.square(samples, dtype=np.float64)))) >= self.rms:
+            self.done = True  # sound arrived: the stream works
+            return False
+        self.silent_s += len(samples) / SR
+        self.done = self.silent_s >= self.seconds
+        return self.done
 
 
 def utterances(samples: np.ndarray, start_ts: float, step_s: float = config.AMBIENT_STEP_S) -> Iterator[dict]:
@@ -141,6 +180,8 @@ class Listener:
         self._q: queue.Queue[np.ndarray] = queue.Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self.device: str | None = None  # name of the open input device
+        self.warning: str | None = None  # set when the open stream delivers only silence
 
     def start(self) -> None:
         """Start the worker thread. It opens and closes the microphone as the pause switch changes."""
@@ -157,7 +198,8 @@ class Listener:
     def _open(self) -> sd.InputStream:
         stream = sd.InputStream(samplerate=SR, channels=1, dtype="float32", callback=self._on_audio)
         stream.start()
-        events.emit("senses.ambient.state", state="listening", device=sd.query_devices(kind="input")["name"])
+        self.device = sd.query_devices(kind="input")["name"]
+        events.emit("senses.ambient.state", state="listening", device=self.device)
         return stream
 
     def _on_audio(self, block, _frames, _time, _status):
@@ -169,8 +211,12 @@ class Listener:
             blocks.append(self._q.get())
         return np.concatenate(blocks) if blocks else np.zeros(0, np.float32)
 
+    def _warn_silent(self) -> None:
+        self.warning = platforms.current().mic_silent_hint
+        events.emit("senses.ambient.warning", message=self.warning, device=self.device, seconds=config.AMBIENT_SILENT_S)
+
     def _run(self) -> None:
-        stream, seg = None, Segmenter(audio.VAD(), time.time())
+        stream, seg, check = None, Segmenter(audio.VAD(), time.time()), SilenceCheck()
         while not self._stop.wait(config.AMBIENT_STEP_S):
             if audio.paused():
                 if stream:  # really close the microphone
@@ -179,8 +225,12 @@ class Listener:
                     events.emit("senses.ambient.state", state="paused")
                 continue
             if stream is None:
-                stream, seg = self._open(), Segmenter(audio.VAD(), time.time())
-            for u in seg.feed(self._drain()):
+                stream, seg, check = self._open(), Segmenter(audio.VAD(), time.time()), SilenceCheck()
+                self.warning = None
+            samples = self._drain()
+            if check.feed(samples):
+                self._warn_silent()
+            for u in seg.feed(samples):
                 self.on_utterance(u)
         if stream:
             stream.close()

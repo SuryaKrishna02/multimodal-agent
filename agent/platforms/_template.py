@@ -19,6 +19,7 @@ class MyOS(Platform):  # one Platform subclass per file
     # raw_video_suffix = ".mp4"                # container record_screen() writes
     # monospace_font = "/path/to/font.ttf"     # for rendered test images (smoke test, synthetic evals)
     # screen_blank_hint = "..."                # shown when a screenshot comes back blank
+    # mic_silent_hint = "..."                  # shown when the microphone delivers only silence
 
     @classmethod
     def matches(cls) -> bool:
