@@ -181,6 +181,8 @@
           <button id="daemon-kill" class="small danger" data-busy="Killing…" title="SIGKILL: no cleanup runs, as in a crash. Start it again to see it resume.">Kill (crash test)</button></span></h3>
         <div id="daemon-tiles" class="tiles"></div>
         <div class="row" style="margin-top:12px"><button id="listen-switch" class="mic paused" role="switch" aria-checked="false">Always-on listening off</button>
+          <label class="hint">for <select id="listen-for"><option value="">until I stop it</option><option value="30">30 min</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option></select></label>
+          <label class="hint">only between <input id="listen-from" type="time"> and <input id="listen-to" type="time"></label>
           <span class="hint">The daemon transcribes what it hears with Whisper and stores it as raw memories. The Mic switch at the top still pauses it.</span></div></div>
       <div class="card"><h3>What the agent did on its own</h3>
         <p class="hint">Each finished job, newest first, with the reason it ran.</p>

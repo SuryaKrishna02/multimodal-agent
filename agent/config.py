@@ -77,6 +77,7 @@ MEDIA_MEMORY_KINDS = ("screen_help", "voice_note", "transcript")  # kinds that a
 # --- Consolidation and forgetting (Session 2) --------------------------------
 SUMMARY_WINDOW_S = 30 * 60  # raw rows in the same 30-minute window become one summary
 SUMMARY_MAX_ROWS = 40  # ...but at most this many rows go into one model request
+SUMMARY_GAP_S = 10 * 60  # ...and a pause this long ends the window early: that conversation is over
 SUMMARY_MIN_ROWS = 2  # a window with fewer raw rows waits for more
 RAW_RETENTION_DAYS = 7  # raw rows that a summary covers are deleted after this many days
 RECALL_TOP_K = 6  # memories that Task 3 reads to answer a question about earlier events
@@ -108,6 +109,9 @@ SCHEDULE = {
     "prune_events": ("prune_events", "at 03:05"),
 }
 TRANSCRIPTS_PER_SUMMARY = 20  # trigger: summarize early when this many new transcript rows wait
+# Timed listening. The daemon listens only inside this daily window of local time ("HH:MM", "HH:MM"); an end before
+# the start crosses midnight. None = any time of day. `listen on --window` and the dashboard can replace it.
+LISTEN_WINDOW: tuple[str, str] | None = None
 NOTIFY_JOBS = ("brief",)  # jobs whose result also shows a desktop notification
 AUTOSTART_LABEL = "com.multimodal-agent.daemon"  # name of the login item that starts the daemon
 # A helper that a platform's login item needs, if any (macOS: an .app that holds the Microphone permission for the

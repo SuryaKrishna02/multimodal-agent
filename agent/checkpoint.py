@@ -217,6 +217,29 @@ def get(key: str, default=None):
     return json.loads(row[0]) if row else default
 
 
+def put_unless(key: str, value, taken: Callable) -> object | None:
+    """Store a value only if the stored one is not taken, in one write transaction.
+
+    Two processes that call this at the same time cannot both win: SQLite lets one writer in at a time.
+
+    Args:
+        key (str): The name.
+        value (Any): A JSON-serializable value.
+        taken (Callable): Gets the stored value (or None) and returns True if it must not be replaced.
+
+    Returns:
+        object | None: None if `value` was stored, or the stored value that was taken.
+    """
+    with _db() as db:
+        db.execute("BEGIN IMMEDIATE")  # take the write lock before the read
+        row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+        old = json.loads(row[0]) if row else None
+        if taken(old):
+            return old
+        db.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", (key, json.dumps(value)))
+    return None
+
+
 def put(key: str, value) -> None:
     """Store a small value that must survive a restart.
 

@@ -18,6 +18,7 @@ Session 2 (always on and learning):
     python cli.py daemon start|run|stop|kill|status    the always-on process (kill = crash it, for the demo)
     python cli.py daemon install|uninstall             start it at login (and after a crash)
     python cli.py listen on|off                        always-on listening in the daemon
+    python cli.py listen on --for 45m --window 09:00-17:00   stop after 45 min; listen only in that window
     python cli.py replay morning.wav --at 09:00        Task 3: replay a recording as if it was heard live
     python cli.py ask "what did I decide about the venue this morning?"     Task 3: answer from memory
     python cli.py consolidate [--forget]               summarize raw memories now (and apply retention)
@@ -228,7 +229,8 @@ def cmd_daemon(a):
     plat, st = platforms.current(), daemon.status()
     cmd = [sys.executable, str(config.ROOT / "cli.py"), "daemon", "run"]
     if a.action == "run":
-        daemon.Daemon(models=not a.no_models).run()
+        if (other := daemon.Daemon(models=not a.no_models).run()) is not None:
+            print(f"another daemon already runs (pid {other}), so this one exits")
     elif a.action == "start":
         if st["alive"]:
             return print(f"already running (pid {st['pid']})")
@@ -238,6 +240,9 @@ def cmd_daemon(a):
         stop_daemon(st, kill=a.action == "kill")
     elif a.action == "install":
         print(f"installed: {plat.install_autostart(config.AUTOSTART_LABEL, cmd, config.ROOT, config.DAEMON_LOG)}")
+        if st["alive"] and daemon.status().get("pid") == st["pid"]:  # the installer stopped its own old copy, not this
+            print(f"a daemon that `daemon start` started still runs (pid {st['pid']}), so the login item's copy exits.")
+            print("Stop it (python cli.py daemon stop), then run python cli.py daemon install again.")
     elif a.action == "uninstall":
         print("removed" if plat.uninstall_autostart(config.AUTOSTART_LABEL) else "no login item was installed")
     else:
@@ -260,17 +265,54 @@ def stop_daemon(st: dict, kill: bool) -> None:
     print(f"{'killed' if kill else 'stopping'} pid {st['pid']}")
 
 
-def cmd_listen(a):
-    """`listen`: ask the daemon to start or stop always-on listening.
+def duration_s(text: str) -> float:
+    """Turn a duration such as "45m", "2h", "1h30m" or "90s" into seconds.
 
     Args:
-        a (argparse.Namespace): Parsed arguments with `state`.
+        text (str): The duration. A bare number is minutes.
+
+    Returns:
+        float: Seconds.
+
+    Raises:
+        argparse.ArgumentTypeError: If the text is not a duration.
     """
+    import re
+
+    text = text.strip()
+    if text.replace(".", "", 1).isdigit():
+        return float(text) * 60
+    parts = re.fullmatch(r"(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?", text)
+    if not parts or not any(parts.groups()):
+        raise argparse.ArgumentTypeError(f"not a duration: {text!r} (examples: 45m, 2h, 1h30m)")
+    h, m, sec = (float(g or 0) for g in parts.groups())
+    return h * 3600 + m * 60 + sec
+
+
+def cmd_listen(a):
+    """`listen`: ask the daemon to start or stop always-on listening, for a time or inside a daily window.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `state`, `for_s` and `window`.
+    """
+    import time
+
     from agent import daemon
 
-    daemon.set_listening(a.state == "on")
+    window = None if a.window is None else [] if a.window == "any" else a.window.split("-")
+    try:
+        daemon.set_listening(a.state == "on", a.for_s, window, reason="cli")
+    except ValueError as e:
+        sys.exit(f"listen: {e}")
     st = daemon.status()
-    print(f"listening {a.state}" + ("" if st["alive"] else " (the daemon is not running: python cli.py daemon start)"))
+    ls, extra = st["listen"], []
+    if ls["on"] and ls["until"]:
+        extra.append("until " + time.strftime("%H:%M", time.localtime(ls["until"])))
+    if ls["on"] and ls["window"]:
+        extra.append("only " + "-".join(ls["window"]) + (f", {ls['note']} now" if ls["note"] else ""))
+    if not st["alive"]:
+        extra.append("the daemon is not running: python cli.py daemon start")
+    print(f"listening {a.state}" + (f" ({'; '.join(extra)})" if extra else ""))
 
 
 def at_today(hhmm: str | None) -> float:
@@ -400,6 +442,8 @@ def _session2_parsers(sub) -> None:
     p.set_defaults(fn=cmd_daemon)
     p = sub.add_parser("listen", help="always-on listening in the daemon")
     p.add_argument("state", choices=["on", "off"])
+    p.add_argument("--for", dest="for_s", type=duration_s, help="stop after this long, e.g. 45m, 2h, 1h30m")
+    p.add_argument("--window", help="listen only between these local times each day, e.g. 09:00-17:00; any = all day")
     p.set_defaults(fn=cmd_listen)
     p = sub.add_parser("replay", help="Task 3: replay a recording through the ambient listener")
     p.add_argument("path")

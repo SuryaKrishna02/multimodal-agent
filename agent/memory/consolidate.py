@@ -1,6 +1,7 @@
 """Consolidation: raw rows -> summaries -> facts, with a citation for every claim. Then forgetting.
 
-1. window     group raw rows that are close in time (config.SUMMARY_WINDOW_S)
+1. window     group raw rows that are close in time (config.SUMMARY_WINDOW_S, SUMMARY_GAP_S, SUMMARY_MAX_ROWS).
+              Only a closed window is summarized, so a conversation that goes on is not cut in two
 2. summarize  one request per window returns claims and facts, and each one cites the raw ids it comes from
 3. check      code drops cited ids that are not in the window, and every claim that cites nothing
 4. store      facts first, then the summary. The summary is the commit marker: once it exists,
@@ -81,8 +82,17 @@ Is every part of the claim stated in the sources above? Answer supported=false i
 changes or guesses anything that the sources do not say."""
 
 
+def _joins(w: list[dict], ts: float) -> bool:
+    """Return whether a row at `ts` still belongs to window `w`: inside its span, no long pause, and not full."""
+    return (
+        ts - w[0]["ts"] < config.SUMMARY_WINDOW_S
+        and ts - w[-1]["ts"] < config.SUMMARY_GAP_S
+        and len(w) < config.SUMMARY_MAX_ROWS
+    )
+
+
 def windows(rows: list[dict]) -> list[list[dict]]:
-    """Group rows (oldest first) into windows of at most SUMMARY_WINDOW_S and SUMMARY_MAX_ROWS.
+    """Group rows (oldest first) into windows of at most SUMMARY_WINDOW_S and SUMMARY_MAX_ROWS, cut at long pauses.
 
     Args:
         rows (list[dict]): Raw memories, oldest first.
@@ -92,20 +102,35 @@ def windows(rows: list[dict]) -> list[list[dict]]:
     """
     out: list[list[dict]] = []
     for r in rows:
-        if out and r["ts"] - out[-1][0]["ts"] < config.SUMMARY_WINDOW_S and len(out[-1]) < config.SUMMARY_MAX_ROWS:
+        if out and _joins(out[-1], r["ts"]):
             out[-1].append(r)
         else:
             out.append([r])
     return out
 
 
+def closed(w: list[dict], now: float) -> bool:
+    """Return whether no new row can join a window any more, by the same rule that `windows` groups with.
+
+    Args:
+        w (list[dict]): A window, oldest row first.
+        now (float): The current time.
+
+    Returns:
+        bool: True when a row stored now would start a new window.
+    """
+    return not _joins(w, now)
+
+
 def pending(force: bool = False, now: float | None = None) -> list[list[dict]]:
     """Return the windows of raw rows that no summary covers yet and that are ready to summarize.
 
-    A window is ready once it is complete (its start is SUMMARY_WINDOW_S ago) and has SUMMARY_MIN_ROWS rows.
+    A window is ready once it is closed (`closed`) and has SUMMARY_MIN_ROWS rows. An open window can still get rows,
+    and a summary of it now would cover only the first part of the conversation.
 
     Args:
-        force (bool, optional): Summarize open and small windows too. Defaults to False.
+        force (bool, optional): Summarize open and small windows too (`cli.py consolidate`, Summarize now).
+            Defaults to False.
         now (float, optional): The current time. Defaults to `time.time()`.
 
     Returns:
@@ -113,12 +138,7 @@ def pending(force: bool = False, now: float | None = None) -> list[list[dict]]:
     """
     now = now or time.time()
     rows = episodic.query_rows("level = 'raw' AND covered_by IS NULL")
-    ready = []
-    for w in windows(rows):
-        complete = now - w[0]["ts"] >= config.SUMMARY_WINDOW_S
-        if force or (complete and len(w) >= config.SUMMARY_MIN_ROWS):
-            ready.append(w)
-    return ready
+    return [w for w in windows(rows) if force or (closed(w, now) and len(w) >= config.SUMMARY_MIN_ROWS)]
 
 
 def window_key(rows: list[dict]) -> str:
@@ -229,19 +249,20 @@ def _store_facts(facts: list[dict], known_ids: set[int], ts: float) -> list[int]
     return new_ids
 
 
-def consolidate(force: bool = False, step=None) -> list[dict]:
+def consolidate(force: bool = False, step=None, now: float | None = None) -> list[dict]:
     """Summarize every ready window.
 
     Args:
         force (bool, optional): Also summarize open and small windows. Defaults to False.
         step (Callable, optional): `checkpoint.step` bound to a job, so each window is one checkpointed step.
             Defaults to running each window directly.
+        now (float, optional): The current time. Defaults to `time.time()`.
 
     Returns:
         list[dict]: The result of `summarize_window` for each window.
     """
     out = []
-    for w in pending(force):
+    for w in pending(force, now):
         key = window_key(w)
         run = lambda w=w: summarize_window(w)  # noqa: E731
         out.append(step(f"window:{key}", run, {"rows": len(w)}) if step else run())

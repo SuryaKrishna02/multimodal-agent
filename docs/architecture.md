@@ -84,8 +84,8 @@ Start, stop, health, chat and embed.
 | `llama-server` on port 9931 | Gemma 4 E4B (default) or E2B, Q4_0. The mmproj handles audio, image and video. 16k context. Video runs at 1 fps, decoded with ffmpeg. The GPU plug-in provides the binary and flags. |
 | `llama-server` on port 9932 | EmbeddingGemma-2, 768-d vectors |
 
-The dashboard watches both servers. It restarts a server whose process stops, on the current tier, unless `cli.py stop`
-stopped it.
+The dashboard watches both servers (the daemon does when it runs). It restarts a server whose process stops, on the
+current tier, unless `cli.py stop` stopped it. A check that fails emits `serving.error`, and the watcher keeps going.
 
 ### 2 Senses: `agent/senses/`
 
@@ -252,11 +252,11 @@ flowchart TB
 
 | File | What it does |
 | ---- | ------------ |
-| `agent/daemon.py` | The main loop, once a second: queue the scheduled jobs that are due, check the triggers, run one job. A heartbeat thread writes "alive" every 5 s. On start, `checkpoint.recover()` re-queues the job that was running when the process died. Each finished job goes to the feed with its reason. |
+| `agent/daemon.py` | The main loop, once a second: queue the scheduled jobs that are due, check the triggers, run one job. A heartbeat thread writes "alive" every 5 s. A new daemon writes its first heartbeat in one SQLite write transaction (`checkpoint.put_unless`), and it exits if another daemon still beats. On start, `checkpoint.recover()` re-queues the job that was running when the process died. Each finished job goes to the feed with its reason. The listening switch can carry an end time (`listen on --for`) and a daily window (`LISTEN_WINDOW`, `--window`); `wants_listening()` reads them every tick. |
 | `agent/checkpoint.py` | A job queue and a step log in SQLite. `step()` records intent, then execution, then the result. On a rerun, a step with a result returns the stored output and does not run again. |
 | `agent/senses/ambient.py` | `Segmenter` cuts a stream at pauses, while the audio arrives. `Listener` is the live microphone, and it closes the microphone when the pause switch is on. `SilenceCheck` emits `senses.ambient.warning` when the stream gives only silence for `AMBIENT_SILENT_S` after it opens (an OS without the Microphone permission gives zeros, not an error). `utterances()` feeds a recording through the same Segmenter for a replay. |
 | `agent/senses/stt.py` | Speech to text for always-on listening: Whisper through the accelerator's `transcribe` hook, or Gemma 4. |
-| `agent/memory/consolidate.py` | Groups raw rows into 30-minute windows. One request per window writes claims and facts, and each one cites raw ids. Code drops invalid citations. `forget()` deletes covered raw rows after 7 days. `judge()` checks one claim against only the rows it cites. |
+| `agent/memory/consolidate.py` | Groups raw rows into windows of at most 30 minutes and 40 rows. A pause of 10 minutes (`SUMMARY_GAP_S`) ends a window early. Only a closed window is summarized: one that no new row can join, because its 30 minutes are over, it is full, or the pause has passed. So a conversation that goes on while the trigger fires is not cut into two summaries (`cli.py consolidate` and Summarize now still force an open window). One request per window writes claims and facts, and each one cites raw ids. Code drops invalid citations. `forget()` deletes covered raw rows after 7 days. `judge()` checks one claim against only the rows it cites. |
 | `agent/memory/episodic.py` | Adds a level (raw, summary, fact), `covered_by`, `superseded_by` and a second vector for the screenshot or the audio clip. `search()` takes a mode (text, media or both) and a time window. |
 | `agent/evolve.py` | The brief prompt: locked blocks in code, plus a style block and a preference list in versioned rows. `reflect()` asks for a patch, and `validate_patch()` refuses anything outside the editable parts. Then the generality gate writes briefs with the parent and the new version for a few recent days (`config.EVOLVE_GATE_DAYS`): if `ungrounded()` finds names or numbers in the new briefs that the memories never say and the parent did not write, the patch is refused (`evolve.rejected`). `rollback()` makes any version active. |
 | `agent/tasks.py` | Task 3, `recall()`: a time window from the question ("this morning"), a search, and an answer that cites memory ids. Task 4, `daily_brief()`: the day's summaries, facts, action items and screen episodes, written with the active prompt version. |
@@ -275,7 +275,7 @@ flowchart TB
 
 ### Data flow for one daemon job
 
-1. A trigger queues a job: the schedule, a count of new transcripts, the dashboard or `cli.py`. The job row holds its
+1. A trigger queues a job: the schedule, a count of new transcripts once a window closes, the dashboard or `cli.py`. The job row holds its
    kind, its inputs and the reason.
 2. The main loop claims the oldest queued job and marks it `running`.
 3. The handler runs each step through `checkpoint.step()`: intent, execution, then the result with its output.

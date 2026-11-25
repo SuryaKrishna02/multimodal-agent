@@ -62,6 +62,36 @@ class EmbedServerTest(unittest.TestCase):
         self.assertEqual(flag(args, "-ub"), size)
 
 
+class ProcessesTest(unittest.TestCase):
+    """The process lookup finds the server's process and skips any process it cannot read."""
+
+    def test_unreadable_processes_are_skipped(self) -> None:
+        """A process that raises (SystemError as psutil 7.2.2 did on macOS, or AccessDenied) is not the server."""
+        server = embed_server()
+        exe = serving.platforms.current().exe("llama-server")
+
+        def proc(name: str | Exception, cmdline: list[str] | Exception | None = None) -> mock.Mock:
+            p = mock.Mock()
+            p.name.side_effect = name if isinstance(name, Exception) else None
+            p.name.return_value = name
+            p.cmdline.side_effect = cmdline if isinstance(cmdline, Exception) else None
+            p.cmdline.return_value = cmdline
+            return p
+
+        mine = proc(exe, ["llama-server", "--port", str(server.port)])
+        other = proc("python", ["python", "cli.py"])
+        others = [
+            proc(SystemError("proc_name returned a result with an exception set")),
+            proc(exe, serving.psutil.AccessDenied(1)),
+            proc(exe, SystemError("proc_cmdline returned a result with an exception set")),
+            proc(exe, ["llama-server", "--port", "1"]),
+            other,
+        ]
+        with mock.patch.object(serving.psutil, "process_iter", return_value=[*others, mine]):
+            self.assertEqual(server._processes(), [mine])
+        other.cmdline.assert_not_called()  # only a process with the right name has its command line read
+
+
 class WatchTest(unittest.TestCase):
     """The watcher restarts a server that stopped by accident, and only that server."""
 
@@ -161,6 +191,21 @@ class WatchTest(unittest.TestCase):
         wait, _ = self.check(side_effect=RuntimeError("boom"))
         self.assertEqual(wait, config.SERVER_RETRY_S)
         self.assertIn("boom", (serving.events.last("serving.error") or {}).get("message", ""))
+
+    def test_watcher_survives_a_failed_check(self) -> None:
+        """An error in one check is reported, the watcher waits the longer time, and the next check still runs."""
+
+        class Done(Exception):
+            """Ends the loop that never returns."""
+
+        first, second = mock.Mock(), mock.Mock()
+        first.restart_if_stopped.side_effect = SystemError("proc_cmdline returned a result with an exception set")
+        second.restart_if_stopped.return_value = 1
+        servers = iter([first, second])
+        with mock.patch.object(serving.time, "sleep", side_effect=[None, Done]) as sleep, self.assertRaises(Done):
+            serving.watch(lambda: next(servers))
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [config.SERVER_RETRY_S, 1])
+        self.assertIn("SystemError", (serving.events.last("serving.error") or {}).get("message", ""))
 
     def test_log_of_the_stopped_server_is_kept(self) -> None:
         """`start` overwrites the log, so the restart keeps the old one for finding out why the server stopped."""

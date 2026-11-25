@@ -753,7 +753,7 @@ h3.label { font-family: var(--font-head); font-size: 20px; font-weight: 600; col
   <h2>Daemon: queue what is due, then run one job</h2>
   <p class="rel"><b>Called by</b> <code>Daemon.run()</code> <b>Calls</b> <code>due()</code>, <code>triggers()</code>, <code>claim_next()</code>, <code>run_job()</code></p>
   <div class="walk" style="grid-template-columns:1.15fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/daemon.py  Daemon.tick()</div><pre class="code" data-blocks='[[331, 332, 0], [333, 336, 1], [337, 341, 2]]' data-src="agent/daemon.py:331-341">for _name, kind, reason in due():
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/daemon.py  Daemon.tick()</div><pre class="code" data-blocks='[[461, 462, 0], [463, 466, 1], [467, 471, 2]]' data-src="agent/daemon.py:461-471">for _name, kind, reason in due():
     checkpoint.submit(kind, {}, reason)
 if self.models:
     for kind, args, reason in triggers():
@@ -763,7 +763,7 @@ j = checkpoint.claim_next()
 if j and j["kind"] in JOBS:
     self.run_job(j)
 elif j:
-    checkpoint.finish(j["id"], "failed", f"unknown job kind '{j['kind']}'")</pre></div><div class="code-wrap"><div class="code-file">agent/daemon.py  Daemon.run_job()</div><pre class="code" data-blocks='[[319, 321, 3]]' data-src="agent/daemon.py:319-321">events.emit("daemon.action", job_id=j["id"], job=j["kind"], reason=j["reason"], status=status, summary=summary)
+    checkpoint.finish(j["id"], "failed", f"unknown job kind '{j['kind']}'")</pre></div><div class="code-wrap"><div class="code-file">agent/daemon.py  Daemon.run_job()</div><pre class="code" data-blocks='[[449, 451, 3]]' data-src="agent/daemon.py:449-451">events.emit("daemon.action", job_id=j["id"], job=j["kind"], reason=j["reason"], status=status, summary=summary)
 if status == "done" and j["kind"] in config.NOTIFY_JOBS:
     self._notify(j["kind"], summary)</pre></div></div>
     <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Schedule</b><span class="txt"><code>due()</code> turns each due slot of <code>config.SCHEDULE</code> into a queued job with a reason.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Triggers</b><span class="txt">20 new transcripts queue a summary early. The listener follows your switch.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One job</b><span class="txt">The oldest queued job runs, from the schedule or from the dashboard.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>The feed</b><span class="txt">Each finished job goes to the feed with its reason. A brief also shows a notification.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Two requests upgraded one database at the same time, and one failed. Now <code>agent/sql.py</code> changes tables under a lock. Make shared schema changes safe to run twice.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd><code>scripts/soak.py</code>, 1 hour with the lid open.</dd><dt>Output</dt><dd>Missed slots, heartbeats, memory.</dd><dt>Metrics</dt><dd>0 missed events in 12 jobs. Daemon memory flat at 1.9 GB.</dd></dl></li></ol>
@@ -862,7 +862,7 @@ mem_id = episodic.store(text, kind="transcript", meta=meta, ts=u["start_ts"], me
   <h2>Memory: a window of raw rows becomes claims</h2>
   <p class="rel"><b>Called by</b> <code>consolidate()</code>, one step per window <b>Calls</b> <code>brain.ask_json()</code>, <code>_cited()</code></p>
   <div class="walk" style="grid-template-columns:1.6fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py  reply_schema()</div><pre class="code" data-blocks='[[34, 34, 0]]' data-src="agent/memory/consolidate.py:34-34">sources = {"type": "array", "items": {"type": "integer", "enum": ids}}</pre></div><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py  summarize_window()</div><pre class="code" data-blocks='[[175, 179, 1], [196, 197, 2], [208, 213, 3]]' data-src="agent/memory/consolidate.py:175-179,196-197,208-213">key, ids = window_key(rows), [r["id"] for r in rows]
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py  reply_schema()</div><pre class="code" data-blocks='[[35, 35, 0]]' data-src="agent/memory/consolidate.py:35-35">sources = {"type": "array", "items": {"type": "integer", "enum": ids}}</pre></div><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py  summarize_window()</div><pre class="code" data-blocks='[[195, 199, 1], [216, 217, 2], [228, 233, 3]]' data-src="agent/memory/consolidate.py:195-199,216-217,228-233">key, ids = window_key(rows), [r["id"] for r in rows]
 done = episodic.query_rows("level = 'summary' AND json_extract(meta, '$.window_key') = ?", (key,))
 if done:
     episodic.mark_covered(ids, done[0]["id"])
@@ -1050,7 +1050,7 @@ data["memory_ids"] = [i for i in data["memory_ids"] if i in known]  # a cited id
     <div class="fhead"><ol class="fchips"><li><button type="button" class="fchip" data-i="0"><span class="num">1</span>Replay</button></li><li><button type="button" class="fchip" data-i="1"><span class="num">2</span>Hear</button></li><li><button type="button" class="fchip" data-i="2"><span class="num">3</span>Summarize</button></li><li><button type="button" class="fchip" data-i="3"><span class="num">4</span>Time window</button></li><li><button type="button" class="fchip" data-i="4"><span class="num">5</span>Search</button></li><li><button type="button" class="fchip" data-i="5"><span class="num">6</span>Answer</button></li></ol><button class="reset" type="button">Reset</button></div>
     <div class="fpane" data-i="0">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/daemon.py</div><pre class="code" data-src="agent/daemon.py:95-100">for i, u in enumerate(ambient.utterances(ambient.load_replay(Path(a["path"])), a["start_ts"])):
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/daemon.py</div><pre class="code" data-src="agent/daemon.py:96-101">for i, u in enumerate(ambient.utterances(ambient.load_replay(Path(a["path"])), a["start_ts"])):
     name = f"utterance:{i}"
     if a.get("speed") and not checkpoint.stored_result(j["id"], name)[0]:
         t0 = t0 if t0 is not None else time.time() - u["offset_s"] / a["speed"]  # resumed: go on from here
@@ -1080,7 +1080,7 @@ mem_id = episodic.store(text, kind="transcript", meta=meta, ts=u["start_ts"], me
         </div>
       </div><div class="fpane" data-i="2">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py</div><pre class="code" data-src="agent/memory/consolidate.py:181-185,196-197">text = "Raw memories:\n" + "\n".join(map(_line, rows))
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/memory/consolidate.py</div><pre class="code" data-src="agent/memory/consolidate.py:201-205,216-217">text = "Raw memories:\n" + "\n".join(map(_line, rows))
 if known:
     text += "\n\nKnown facts:\n" + "\n".join(f"[F{f['id']}] {f['text']}" for f in known)
 prompt = PROMPT.format(n=max(1, -(-len(rows) // 3)))  # about one claim per three raw rows

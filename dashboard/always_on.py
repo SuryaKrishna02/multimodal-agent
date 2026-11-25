@@ -59,12 +59,20 @@ def daemon_listen(body: dict):
     """Ask the daemon to listen all the time, or to stop. The microphone pause switch still wins.
 
     Args:
-        body (dict): JSON with `on` (bool).
+        body (dict): JSON with `on` (bool), optional `for_min` (stop after this many minutes) and optional `window`
+            (["HH:MM", "HH:MM"] each day; [] = any time; missing = `config.LISTEN_WINDOW`).
 
     Returns:
         dict: The daemon state.
+
+    Raises:
+        HTTPException: 400 for a bad duration or window.
     """
-    daemon.set_listening(bool(body["on"]))
+    for_s = float(body["for_min"]) * 60 if body.get("for_min") else None
+    try:
+        daemon.set_listening(bool(body["on"]), for_s, body.get("window"), reason="dashboard")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return daemon_state()
 
 
