@@ -133,6 +133,8 @@ triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The das
 .venv/bin/python cli.py daemon start             # in the background; the log is data/runtime/daemon.log
 .venv/bin/python cli.py daemon status
 .venv/bin/python cli.py listen on                # always-on listening: Whisper -> raw memories (the Mic switch pauses it)
+.venv/bin/python cli.py listen on --for 45m      # ...and stop after 45 minutes (also 2h, 1h30m)
+.venv/bin/python cli.py listen on --window 09:00-17:00   # ...only between these local times each day
 .venv/bin/python cli.py replay data/evals/synthetic/task3/conversation.wav --at 09:00    # Task 3 demo input
 .venv/bin/python cli.py ask "what did we decide about the offsite venue this morning?"
 .venv/bin/python cli.py brief                    # Task 4: today's brief
@@ -142,6 +144,12 @@ triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The das
 .venv/bin/python cli.py daemon kill              # a crash (SIGKILL): start it again and it resumes the job
 .venv/bin/python cli.py daemon stop
 ```
+
+**Timed listening.** `--for` stores an end time; when it passes, the daemon turns the switch off. `--window` limits
+listening to a daily window of local time (an end before the start crosses midnight); the switch stays on and the
+daemon listens again when the window opens. Without `--window`, `LISTEN_WINDOW` in `agent/config.py` applies (None =
+any time); `--window any` turns it off for this switch. The Always on tab has the same two options next to the
+listening switch. The Mic switch at the top still pauses the microphone over all of these.
 
 For the live demo of Task 4, you can run some feedback rounds before the session:
 `python cli.py evolve simulate --rounds 3`. The simulated user writes the feedback, and each row is labeled
@@ -169,8 +177,11 @@ requests could not find `ffprobe`). Run `daemon install` again after you install
 
 If the microphone still gives only silence, always-on listening emits `senses.ambient.warning` 5 s after it opens
 the microphone (`AMBIENT_SILENT_S` and `AMBIENT_SILENT_RMS` in `agent/config.py`). The dashboard shows it, and
-`python cli.py daemon status` shows it as `mic_warning`. Stop a daemon that `daemon start` started before you run
-`daemon install`, because there is no lock against a second copy.
+`python cli.py daemon status` shows it as `mic_warning`.
+
+**One daemon at a time.** A daemon that starts while another one still writes its heartbeat exits at once with code 0
+and emits `daemon.refused`. So if `daemon start` started a daemon, the copy of the login item exits, and
+`daemon install` says so: stop the first daemon, then run `daemon install` again.
 
 **Keep the Mac awake.** While the daemon runs, it holds `caffeinate -i`, so idle sleep does not stop it. The hold ends
 when the daemon exits, even after a kill. A Mac laptop still sleeps when you close the lid, unless it is on power with

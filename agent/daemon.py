@@ -20,6 +20,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import psutil
 
@@ -174,18 +175,24 @@ def open_jobs(kind: str) -> int:
     return sum(1 for j in checkpoint.jobs(200) if j["kind"] == kind and j["status"] in ("queued", "running"))
 
 
-def triggers() -> list[tuple[str, dict, str]]:
+def triggers(now: float | None = None) -> list[tuple[str, dict, str]]:
     """Check the conditions that queue a job before its scheduled time.
+
+    Many new transcripts queue a summary as soon as a window closes, not at the next schedule slot. The job
+    summarizes only closed windows: a conversation that goes on is not cut into two summaries.
+
+    Args:
+        now (float, optional): The current time. Defaults to `time.time()`.
 
     Returns:
         list[tuple[str, dict, str]]: (job kind, args, reason) for each job to queue.
     """
-    from agent.memory import episodic
+    from agent.memory import consolidate, episodic
 
     waiting = len(episodic.query_rows("level = 'raw' AND kind = 'transcript' AND covered_by IS NULL"))
-    if waiting >= config.TRANSCRIPTS_PER_SUMMARY and not open_jobs("consolidate"):
-        return [("consolidate", {"force": True}, f"trigger: {waiting} new transcripts")]
-    return []
+    if waiting < config.TRANSCRIPTS_PER_SUMMARY or open_jobs("consolidate") or not consolidate.pending(now=now):
+        return []
+    return [("consolidate", {}, f"trigger: {waiting} new transcripts")]
 
 
 # --- The process -------------------------------------------------------------------
@@ -196,29 +203,136 @@ def status() -> dict:
 
     Returns:
         dict: `alive`, `pid`, `age_s` (seconds since the heartbeat), `started`, `listening`, `mic_warning`
-            (the silent-microphone warning, or None), `job` and `queued`.
+            (the silent-microphone warning, or None), `job`, `queued`, `want_listen` (listen now) and `listen`
+            (the switch: `on`, `until`, `window` and `note`, why it waits).
     """
     beat = checkpoint.get("daemon") or {}
-    age = time.time() - beat.get("ts", 0)
-    pid = beat.get("pid")
-    alive = bool(pid) and age < 3 * config.DAEMON_HEARTBEAT_S and psutil.pid_exists(pid)
     queued = sum(1 for j in checkpoint.jobs(200) if j["status"] == "queued")
-    return {**beat, "alive": alive, "age_s": round(age, 1), "queued": queued, "want_listen": wants_listening()}
+    age = round(time.time() - beat.get("ts", 0), 1)
+    listen = {**listen_state(), "note": listen_note()}
+    return {
+        **beat,
+        "alive": _alive(beat),
+        "age_s": age,
+        "queued": queued,
+        "want_listen": wants_listening(),
+        "listen": listen,
+    }
 
 
-def wants_listening() -> bool:
-    """Return whether the user asked the daemon to listen all the time (dashboard switch or CLI)."""
-    return bool(checkpoint.get("listen", False))
+def _alive(beat: dict | None) -> bool:
+    """Return whether a heartbeat comes from a daemon that still runs (3 missed beats = not running)."""
+    beat = beat or {}
+    pid, age = beat.get("pid"), time.time() - beat.get("ts", 0)
+    return bool(pid) and age < 3 * config.DAEMON_HEARTBEAT_S and psutil.pid_exists(pid)
 
 
-def set_listening(on: bool) -> None:
+# --- Always-on listening: the switch, an end time and a daily window ------------------
+
+
+def _minutes(hhmm: str) -> int:
+    """Turn "HH:MM" into minutes after midnight."""
+    try:
+        hour, minute = map(int, hhmm.split(":"))
+    except ValueError:
+        hour = minute = -1
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        raise ValueError(f"not a time of day: {hhmm!r} (use HH:MM, for example 09:00-17:00)")
+    return hour * 60 + minute
+
+
+def in_window(window: list[str] | tuple[str, str] | None, now: float) -> bool:
+    """Return whether `now` falls inside a daily window of local time.
+
+    Args:
+        window (list[str] | tuple[str, str] | None): ("HH:MM", "HH:MM"), start included, end not. An end before the
+            start crosses midnight. None or empty = any time.
+        now (float): Epoch seconds.
+
+    Returns:
+        bool: True inside the window.
+    """
+    if not window:
+        return True
+    start, end = (_minutes(t) for t in window)
+    t = time.localtime(now)
+    m = t.tm_hour * 60 + t.tm_min
+    return start <= m < end if start <= end else m >= start or m < end
+
+
+def listen_state() -> dict:
+    """Read the listening switch as the user set it.
+
+    Returns:
+        dict: `on` (bool), `until` (epoch seconds or None) and `window` (the daily window that applies, or None).
+    """
+    raw = checkpoint.get("listen", False)
+    st = raw if isinstance(raw, dict) else {"on": bool(raw)}  # older versions stored only True or False
+    window = st.get("window")
+    return {
+        "on": bool(st.get("on")),
+        "until": st.get("until"),
+        "window": config.LISTEN_WINDOW if window is None else window or None,
+    }
+
+
+def listen_note(now: float | None = None) -> str | None:
+    """Say why the switch is on but the daemon does not listen.
+
+    Args:
+        now (float, optional): The current time. Defaults to `time.time()`.
+
+    Returns:
+        str | None: "time up", "outside HH:MM-HH:MM", or None.
+    """
+    now, st = now or time.time(), listen_state()
+    if not st["on"]:
+        return None
+    if st["until"] and now >= st["until"]:
+        return "time up"
+    if not in_window(st["window"], now):
+        return "outside " + "-".join(st["window"])
+    return None
+
+
+def wants_listening(now: float | None = None) -> bool:
+    """Return whether the daemon must listen now: the switch is on, the end time has not passed, inside the window.
+
+    The microphone pause switch (`audio.paused()`) is not read here: the listener checks it and it always wins.
+
+    Args:
+        now (float, optional): The current time. Defaults to `time.time()`.
+
+    Returns:
+        bool: True to listen.
+    """
+    return listen_state()["on"] and listen_note(now) is None
+
+
+def set_listening(on: bool, for_s: float | None = None, window: list[str] | None = None, reason: str = "") -> None:
     """Ask the running daemon to start or stop always-on listening. The pause switch still wins.
 
     Args:
         on (bool): True to listen.
+        for_s (float, optional): Stop after this many seconds. None = until switched off. Defaults to None.
+        window (list[str], optional): A daily window ["HH:MM", "HH:MM"] for this switch. None = `config.LISTEN_WINDOW`,
+            [] = any time of day. Defaults to None.
+        reason (str, optional): Why it changed, for the feed. Defaults to "".
+
+    Raises:
+        ValueError: If `window` does not hold two "HH:MM" times, or `for_s` is not positive.
     """
-    checkpoint.put("listen", bool(on))
-    events.emit("daemon.listen", want=bool(on))
+    if window:
+        if len(window) != 2:
+            raise ValueError("a window is two times: start and end")
+        for t in window:
+            _minutes(t)
+    if for_s is not None and for_s <= 0:
+        raise ValueError("the duration must be positive")
+    until = time.time() + for_s if on and for_s else None
+    # "off" stays a plain False, which a daemon of an older version also reads as off
+    checkpoint.put("listen", {"on": True, "until": until, "window": window} if on else False)
+    events.emit("daemon.listen", want=bool(on), until=until, window=listen_state()["window"], reason=reason)
 
 
 def run_or_queue(kind: str, args: dict, reason: str) -> dict:
@@ -260,23 +374,37 @@ class Daemon:
         self.listener = None
         self.started = time.time()
 
+    def heartbeat(self) -> dict:
+        """Build the heartbeat row that `status()` reads.
+
+        Returns:
+            dict: `pid`, `ts`, `started`, `job`, `listening`, `mic_warning` and `rss_mb`.
+        """
+        j = self.current
+        return {
+            "pid": os.getpid(),
+            "ts": time.time(),
+            "started": self.started,
+            "job": {"id": j["id"], "kind": j["kind"]} if j else None,
+            "listening": self.listener is not None,
+            "mic_warning": self.listener.warning if self.listener else None,
+            "rss_mb": round(psutil.Process().memory_info().rss / 1e6, 1),
+        }
+
     def beat(self) -> None:
         """Write the heartbeat until the daemon stops."""
         while not self.stop_flag.is_set():
-            j = self.current
-            checkpoint.put(
-                "daemon",
-                {
-                    "pid": os.getpid(),
-                    "ts": time.time(),
-                    "started": self.started,
-                    "job": {"id": j["id"], "kind": j["kind"]} if j else None,
-                    "listening": self.listener is not None,
-                    "mic_warning": self.listener.warning if self.listener else None,
-                    "rss_mb": round(psutil.Process().memory_info().rss / 1e6, 1),
-                },
-            )
+            checkpoint.put("daemon", self.heartbeat())
             self.stop_flag.wait(config.DAEMON_HEARTBEAT_S)
+
+    def claim(self) -> int | None:
+        """Write the first heartbeat, unless another daemon still beats. Two daemons would share one runtime folder.
+
+        Returns:
+            int | None: None if this daemon may run, or the pid of the daemon that already runs.
+        """
+        other = checkpoint.put_unless("daemon", self.heartbeat(), lambda b: _alive(b) and b["pid"] != os.getpid())
+        return cast(dict, other)["pid"] if other else None
 
     def _boot(self) -> None:
         if not self.models:
@@ -288,7 +416,9 @@ class Daemon:
             threading.Thread(target=serving.watch, args=(lambda s=server: s,), daemon=True).start()
 
     def _sync_listener(self) -> None:
-        """Start or stop the ambient listener to match the user's switch."""
+        """Start or stop the ambient listener to match the user's switch. A switch whose time is up turns off."""
+        if listen_note() == "time up":
+            set_listening(False, reason="time up")
         want = self.models and wants_listening()
         if want and self.listener is None:
             from agent.senses import ambient
@@ -340,9 +470,16 @@ class Daemon:
         elif j:
             checkpoint.finish(j["id"], "failed", f"unknown job kind '{j['kind']}'")
 
-    def run(self) -> None:
-        """Run until SIGTERM or Ctrl-C. A kill -9 is the crash case that checkpoints cover."""
+    def run(self) -> int | None:
+        """Run until SIGTERM or Ctrl-C. A kill -9 is the crash case that checkpoints cover.
+
+        Returns:
+            int | None: None after a normal run, or the pid of a daemon that already runs (this one did not start).
+        """
         events.set_source("daemon")
+        if (other := self.claim()) is not None:
+            events.emit("daemon.refused", pid=os.getpid(), running_pid=other)
+            return other
         signal.signal(signal.SIGTERM, lambda *_: self.stop_flag.set())
         threading.Thread(target=self.beat, daemon=True).start()
         recovered = checkpoint.recover()
@@ -363,6 +500,7 @@ class Daemon:
                 awake.stop()
             checkpoint.put("daemon", {"pid": None, "ts": 0, "stopped": time.time()})
             events.emit("daemon.stopped", pid=os.getpid())
+        return None
 
     def _keep_awake(self):
         try:

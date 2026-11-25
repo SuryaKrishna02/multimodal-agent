@@ -5,6 +5,7 @@ of Task 3, and the proof that self-evolution never edits a locked prompt block. 
 when the third-party packages of the agent are not installed.
 """
 
+import os
 import tempfile
 import time
 import unittest
@@ -97,6 +98,88 @@ class Schedule(TempRuntime):
         self.assertEqual(len(out), 1)
         self.assertIn("min late", out[0][2])
         self.assertEqual((daemon.events.last("daemon.missed") or {}).get("skipped"), 2)
+
+
+def at(hhmm: str) -> float:
+    """Return today's epoch time at a local "HH:MM"."""
+    h, m = map(int, hhmm.split(":"))
+    return time.mktime(time.localtime()[:3] + (h, m, 0, 0, 0, -1))
+
+
+class TimedListening(TempRuntime):
+    """The listen switch stops at its end time and listens only inside the daily window."""
+
+    def test_no_listening_after_the_end_time(self) -> None:
+        """`--for 60s`: on before the end, off after it, and the note says why."""
+        daemon.set_listening(True, for_s=60)
+        now = time.time()
+        self.assertTrue(daemon.wants_listening(now + 30))
+        self.assertFalse(daemon.wants_listening(now + 61))
+        self.assertEqual(daemon.listen_note(now + 61), "time up")
+
+    def test_no_listening_outside_the_window(self) -> None:
+        """The window of `config` applies when the switch names none."""
+        with mock.patch.object(config, "LISTEN_WINDOW", ("09:00", "17:00")):
+            daemon.set_listening(True)
+            self.assertTrue(daemon.wants_listening(at("09:00")))
+            self.assertFalse(daemon.wants_listening(at("17:00")))
+            self.assertEqual(daemon.listen_note(at("18:30")), "outside 09:00-17:00")
+            daemon.set_listening(True, window=[])  # "any": the switch replaces the config window
+            self.assertTrue(daemon.wants_listening(at("18:30")))
+
+    def test_a_window_can_cross_midnight(self) -> None:
+        """22:00-06:00 holds 23:00 and 03:00, not noon."""
+        daemon.set_listening(True, window=["22:00", "06:00"])
+        self.assertEqual([daemon.wants_listening(at(t)) for t in ("23:00", "03:00", "12:00")], [True, True, False])
+
+    def test_off_wins_and_old_values_still_read(self) -> None:
+        """A switch that is off never listens; a stored True from an older version listens."""
+        daemon.set_listening(False, window=["00:00", "23:59"])
+        self.assertFalse(daemon.wants_listening())
+        checkpoint.put("listen", True)
+        self.assertTrue(daemon.wants_listening())
+
+    def test_bad_values_are_refused(self) -> None:
+        """A window needs two HH:MM times, and a duration must be positive."""
+        for window in (["9am", "17:00"], ["09:00"], ["25:00", "17:00"]):
+            with self.assertRaises(ValueError):
+                daemon.set_listening(True, window=window)
+        with self.assertRaises(ValueError):
+            daemon.set_listening(True, for_s=0)
+
+    def test_the_daemon_turns_the_switch_off_when_time_is_up(self) -> None:
+        """After the end time the switch reads off, so the dashboard shows it off."""
+        checkpoint.put("listen", {"on": True, "until": time.time() - 1, "window": None})
+        daemon.Daemon(models=False)._sync_listener()
+        self.assertFalse(daemon.listen_state()["on"])
+        self.assertEqual((daemon.events.last("daemon.listen") or {}).get("reason"), "time up")
+
+    def test_cli_durations(self) -> None:
+        """45m, 2h, 1h30m, 90s and a bare number of minutes."""
+        import cli
+
+        self.assertEqual([cli.duration_s(t) for t in ("45m", "2h", "1h30m", "90s", "10")], [2700, 7200, 5400, 90, 600])
+        with self.assertRaises(cli.argparse.ArgumentTypeError):
+            cli.duration_s("soon")
+
+
+class SingleDaemon(TempRuntime):
+    """A second daemon on the same runtime folder exits before it does anything."""
+
+    def test_a_second_daemon_does_not_start(self) -> None:
+        """A fresh heartbeat of a live process: `run()` returns its pid and leaves the heartbeat alone."""
+        beat = {"pid": os.getppid(), "ts": time.time()}  # the parent process: alive, and not this one
+        checkpoint.put("daemon", beat)
+        self.assertEqual(daemon.Daemon(models=False).run(), os.getppid())
+        self.assertEqual(checkpoint.get("daemon"), beat)
+        self.assertEqual((daemon.events.last("daemon.refused") or {}).get("running_pid"), os.getppid())
+
+    def test_an_old_heartbeat_does_not_block(self) -> None:
+        """A heartbeat older than 3 beats is a daemon that died: the new one claims the row."""
+        checkpoint.put("daemon", {"pid": os.getppid(), "ts": time.time() - 3 * config.DAEMON_HEARTBEAT_S - 1})
+        d = daemon.Daemon(models=False)
+        self.assertIsNone(d.claim())
+        self.assertEqual((checkpoint.get("daemon") or {}).get("pid"), os.getpid())
 
 
 class FakeVAD:
@@ -241,6 +324,61 @@ class Consolidation(TempRuntime):
         later = time.time() + (config.RAW_RETENTION_DAYS + 1) * 86400
         self.assertEqual(consolidate.forget(now=later)["deleted"], 2)
         self.assertEqual([r["id"] for r in episodic.query_rows("level = 'raw'")], [self.ids[2]])
+
+
+class OpenWindows(TempRuntime):
+    """A conversation that goes on while the trigger fires gets one summary, not two halves."""
+
+    def setUp(self) -> None:
+        """Use a fake embedding server and a fake model reply that cites the first row of the window."""
+        super().setUp()
+        patcher = mock.patch.object(episodic.serving, "embed", side_effect=fake_embed)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def talk(self, start: float, n: int, every_s: float = 30) -> list[int | None]:
+        """Store `n` transcript rows, one each `every_s` seconds from `start`."""
+        return [
+            episodic.store(f"line {start + i * every_s:.0f} of the planning talk", "transcript", ts=start + i * every_s)
+            for i in range(n)
+        ]
+
+    def summarize(self, now: float) -> list[dict]:
+        """Run the consolidation job without force, as the trigger queues it, at time `now`."""
+
+        def reply(parts, schema):
+            first = schema["properties"]["claims"]["items"]["properties"]["sources"]["items"]["enum"][0]
+            return {
+                "claims": [{"text": "The team planned the offsite and its budget.", "sources": [first]}],
+                "facts": [],
+            }, {}
+
+        with mock.patch.object(consolidate.brain, "ask_json", side_effect=reply):
+            return consolidate.consolidate(now=now)
+
+    def test_a_conversation_that_goes_on_gets_one_summary(self) -> None:
+        """25 lines wait (over the trigger), but the talk goes on: nothing is summarized until the window closes."""
+        t0 = time.time() - 20 * 60
+        first = self.talk(t0, 25)  # the last line is 8 minutes ago: under SUMMARY_GAP_S
+        self.assertGreaterEqual(len(first), config.TRANSCRIPTS_PER_SUMMARY)
+        self.assertEqual(daemon.triggers(), [])
+        self.assertEqual(self.summarize(time.time()), [])
+        rest = self.talk(t0 + 25 * 30, 10)  # the same talk goes on
+        self.assertEqual(len(rest), 10)
+        later = t0 + 34 * 30 + config.SUMMARY_GAP_S + 1  # then a pause long enough to close the window
+        self.assertEqual([k for k, _, _ in daemon.triggers(now=later)], ["consolidate"])
+        done = self.summarize(later)
+        self.assertEqual(len(done), 1)
+        self.assertEqual(len(episodic.query_rows("level = 'summary'")), 1)
+        self.assertEqual(len(done[0]["claims"]), 1)
+        self.assertEqual(consolidate.pending(now=later), [])
+
+    def test_a_long_pause_starts_a_new_window(self) -> None:
+        """Two talks with a pause longer than SUMMARY_GAP_S in one half hour are two windows."""
+        t0 = time.time() - 25 * 60
+        self.talk(t0, 3)
+        self.talk(t0 + 60 + config.SUMMARY_GAP_S, 3)
+        self.assertEqual([len(w) for w in consolidate.windows(episodic.query_rows("level = 'raw'"))], [3, 3])
 
 
 class ResetDatabase(TempRuntime):

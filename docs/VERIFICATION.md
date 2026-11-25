@@ -659,6 +659,50 @@ server memory 5.7 GB).
 Not tried: a log out and log in with the launcher (the launcher changes only what launchd runs, not when), and a
 "Don't Allow" answer (the warning covers it, as the probe above shows).
 
+## Timed listening, closed windows and one daemon (2026-11-24)
+
+M4 24 GB, no model needed. The backlog items "Timed listening" and "Partial summaries of a conversation" are done,
+and the daemon no longer runs twice on one runtime folder.
+
+- **The daemon eval again.** `python cli.py evals --run daemon` now reads the 1-hour soak of 2026-11-14 (its cached
+  record still read the 13.8-hour soak of 2026-11-11, when the Mac slept). recovery_s 0.11, redone_steps 0,
+  lost_jobs 0, missed_events 0, rss_growth −25.2 MB/h. `soak_awake_hours` is 0.98, so the record still warns, as
+  "The 1-hour soak" explains.
+- **Timed listening.** In a throwaway runtime (`AGENT_RUNTIME`), with `daemon run --no-models`:
+  `listen on --for 1h30m --window 22:00-06:00` printed `listening on (until 21:20; only 22:00-06:00, outside
+  22:00-06:00 now)`. `listen on --for 2s`: 4 s later the daemon had turned the switch off (`daemon.listen`, reason
+  "time up"). `--window 9am-5pm` and `--for soon` are refused with a message. `POST /api/daemon/listen` with
+  `for_min` 60 and a window returned 200 with `note: "outside 09:00-17:00"`; a bad time returned 400. In the
+  dashboard the duration select and the two time fields render beside the switch. With the request caught in the
+  page (so the real daemon did not start listening), the switch sent `{"on": true, "for_min": 60, "window":
+  ["09:00", "17:00"]}`, and with empty fields `{"for_min": null, "window": []}`. No console errors.
+- **"Off" stays `False`.** The switch is now stored as `{"on": true, "until": ..., "window": ...}` when on and as plain
+  `False` when off. A daemon of the older version reads `bool(value)`, so it still reads "off" as off. Restart such a
+  daemon to get the end time and the window.
+- **Closed windows.** A window is summarized only when no new row can join it: 30 minutes since its first row, 40
+  rows, or a pause of `SUMMARY_GAP_S` (10 minutes). The trigger no longer passes `force`. The synthetic consolidation
+  logs pause at most 5 minutes inside a window, so their windows do not change. A test stores 25 transcripts (over
+  `TRANSCRIPTS_PER_SUMMARY`) while the talk goes on: the trigger queues nothing, 10 more rows arrive, and after the
+  pause there is one summary for all 35 rows.
+- **Notifications.** `platforms.current().notify("multimodal-agent", ...)` from a terminal at 19:53: the person at
+  the Mac saw the notification on the screen. A notification from the daemon that launchd starts was not looked at.
+- **The Session 2 primer.** The code moved, so 6 code panels of `docs/session-2-primer.html` pointed at old line
+  numbers. Its build script is gone, so the line numbers in `data-src` and `data-blocks` were changed in the HTML,
+  mapped from the old file to the new with a diff. The code in the panels did not change. The skill's `check.py`
+  reads 0 errors.
+- **A watcher thread died.** `data/runtime/daemon.log` of the launchd daemon started on 2026-11-18 had a traceback:
+  `Thread-2 (watch)` ended with `SystemError: <built-in function proc_cmdline> returned a result with an exception
+  set`, from `PermissionError ... sysctl(KERN_PROCARGS2)`. `LlamaServer._processes()` read the command line of every
+  process, and psutil 7.2.2 (the newest on PyPI on this date) raised SystemError for one that macOS refused to
+  describe, probably a process that was exiting. `process_iter` does not catch SystemError, so the watcher of the
+  language model server stopped, and from then on a stopped server would not have been restarted. The log has no
+  timestamps, so the time is unknown. Now `_processes()` reads the command line only of a process named
+  `llama-server` and skips any process it cannot read, and `watch()` reports a failed check as `serving.error` and
+  goes on after `SERVER_RETRY_S`. Two tests cover this; both fail on the old code.
+- **One daemon.** In the throwaway runtime, a second `daemon run --no-models` printed `another daemon already runs
+  (pid 44683), so this one exits` with exit code 0, so launchd does not start it again. The first heartbeat is
+  written in one `BEGIN IMMEDIATE` transaction, so two daemons that start at the same moment cannot both win.
+
 ## Not verified yet
 
 - Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool
@@ -669,7 +713,6 @@ Not tried: a log out and log in with the launcher (the launcher changes only wha
 - Memory use with a Google Meet call running alongside.
 - Session 2, the launcher app over a log out and log in, and the "Don't Allow" answer (see "The Microphone permission
   for the launchd daemon"). Listening with real speech in a daemon that launchd starts is verified.
-- Session 2, notifications: `osascript` exited with code 0, but nobody looked at the screen to see the notification.
 - Session 2, a soak of several hours: the longest awake run is 1 h (see "Live microphone, launchd and a 1-hour soak").
   A memory leak of a few MB per hour shows only over 3 hours or more.
 - The voice button of the dashboard chat with a real microphone: a unit test covers it with a mocked microphone. The

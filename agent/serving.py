@@ -142,11 +142,22 @@ class LlamaServer:
         return accel.current().server_memory_gb(self._processes())
 
     def _processes(self) -> list[psutil.Process]:
-        found = []
-        for p in psutil.process_iter(["name", "cmdline"]):
-            cmd = p.info["cmdline"] or []
-            if p.info["name"] == platforms.current().exe("llama-server") and str(self.port) in cmd:
-                found.append(p)
+        """Find the processes of this server: `llama-server` with this port on its command line.
+
+        Only a process with the right name has its command line read. A process that cannot be read (it is exiting,
+        or the OS refuses) is not this server, so it is skipped: one such process killed the watcher thread on macOS,
+        where psutil 7.2.2 raised SystemError for it instead of AccessDenied.
+
+        Returns:
+            list[psutil.Process]: The running processes, usually one.
+        """
+        exe, found = platforms.current().exe("llama-server"), []
+        for p in psutil.process_iter():
+            try:
+                if p.name() == exe and str(self.port) in p.cmdline():
+                    found.append(p)
+            except (psutil.Error, OSError, SystemError):
+                continue
         return found
 
 
@@ -160,7 +171,12 @@ def watch(current: Callable[[], LlamaServer], enabled: Callable[[], bool] = lamb
             watcher off while the daemon runs, so two processes never start the same server. Defaults to always.
     """
     while True:
-        time.sleep(current().restart_if_stopped() if enabled() else config.SERVER_WATCH_S)
+        try:
+            wait = current().restart_if_stopped() if enabled() else config.SERVER_WATCH_S
+        except Exception as e:  # a dead watcher would hide the next stop: report it and keep watching
+            events.emit("serving.error", message=f"The server watcher failed one check: {type(e).__name__}: {e}")
+            wait = config.SERVER_RETRY_S
+        time.sleep(wait)
 
 
 def llm_server(tier: str | None = None) -> LlamaServer:

@@ -9,7 +9,8 @@ Object.assign(DESCRIBE, {
   "daemon.action": (e) => `Daemon ${e.status === "done" ? "finished" : "failed"} ${e.job} job #${e.job_id}: ${e.reason}`,
   "daemon.missed": (e) => `Schedule '${e.schedule}' ran ${Math.round(e.late_s / 60)} min late${e.skipped ? `, ${e.skipped} slots skipped` : ""}`,
   "daemon.warning": (e) => e.message,
-  "daemon.listen": (e) => `Always-on listening switched ${e.want ? "on" : "off"}`,
+  "daemon.listen": (e) => `Always-on listening switched ${e.want ? "on" : "off"}${e.reason === "time up" ? " (time up)" : ""}${e.want && e.until ? `, until ${clockOf(e.until)}` : ""}${e.want && e.window ? `, only ${e.window.join("-")}` : ""}`,
+  "daemon.refused": (e) => `A second daemon (pid ${e.pid}) did not start: pid ${e.running_pid} already runs`,
   "checkpoint.queued": (e) => `Queued ${e.job} job #${e.job_id}: ${e.reason}`,
   "checkpoint.intent": (e) => `Job #${e.job_id}, step ${e.step}: intent recorded`,
   "checkpoint.execution": (e) => `Job #${e.job_id}, step ${e.step}: running`,
@@ -106,9 +107,15 @@ async function refreshDaemon() {
   const listening = s.alive && s.listening;
   const silent = listening && s.mic_warning;
   sw.className = "mic " + (silent ? "recording" : listening ? "live" : "paused");
-  sw.textContent = silent ? "Listening, but the microphone is silent" : listening ? "Always-on listening on" : s.want_listen ? "Listening on (starts with the daemon)" : "Always-on listening off";
+  const L = s.listen || {};
+  const limits = [L.until && `until ${clockOf(L.until)}`, L.window && `only ${L.window.join("-")}`].filter(Boolean).join(", ");
+  sw.textContent = silent ? "Listening, but the microphone is silent"
+    : listening ? `Always-on listening on${limits ? ` (${limits})` : ""}`
+    : L.on && L.note ? `Listening on, waiting (${L.note})`
+    : L.on ? "Listening on (starts with the daemon)" : "Always-on listening off";
   sw.title = silent ? s.mic_warning : "";
-  sw.setAttribute("aria-checked", String(!!s.want_listen));
+  sw.setAttribute("aria-checked", String(!!L.on));
+  if (!L.on && L.window && !$("#listen-from").value && !$("#listen-to").value) [$("#listen-from").value, $("#listen-to").value] = L.window;
   $("#daemon-jobs").innerHTML = d.jobs.map(jobRow).join("") || '<div class="none">No jobs yet.</div>';
   $("#daemon-schedule").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Job</th><th>When</th><th>Last slot</th></tr></thead><tbody>${
     d.schedule.map((r) => `<tr><td>${esc(r.name)}</td><td><code>${esc(r.job)}</code></td><td>${esc(r.when.replace("every ", "every ").replace(/every (\d+)/, (_, n) => `every ${n / 60} min`))}</td><td class="muted">${esc(clockOf(r.last))}</td></tr>`).join("")}</tbody></table></div>`;
@@ -162,7 +169,10 @@ $("#daemon-kill").onclick = (e) => {
 };
 $("#listen-switch").onclick = (e) => {
   const on = e.target.getAttribute("aria-checked") !== "true";
-  busy(e.target, () => api("/api/daemon/listen", { on })).then(refreshDaemon);
+  const from = $("#listen-from").value, to = $("#listen-to").value;
+  if (on && !!from !== !!to) return alert("Give both times of the window, or neither.");
+  const body = { on, for_min: Number($("#listen-for").value) || null, window: from && to ? [from, to] : [] };
+  busy(e.target, () => api("/api/daemon/listen", body)).then(refreshDaemon);
 };
 TAB_REFRESH.daemon = refreshDaemon;
 
