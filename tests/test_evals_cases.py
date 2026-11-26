@@ -81,7 +81,7 @@ class SyntheticBuild(Workspace):
 
     def test_text_builders_write_what_the_loaders_read(self):
         """Each text-based builder gives a folder that the loader of its eval accepts."""
-        for component in ("tools", "tool_calls", "memory"):
+        for component in ("tools", "tool_calls", "memory", "skills", "mcp_select", "proactive", "task5"):
             folder = synthetic.build(component)
             self.assertTrue(common.module(component).load_cases(folder), component)
 

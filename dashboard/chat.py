@@ -313,7 +313,8 @@ def chat(body: dict):
 
     Args:
         body (dict): JSON with `text`, and optional `image` (a data URL), `with_screen` (attach a screenshot)
-            and `voice` (the transcript details, when the text was spoken).
+            `voice` (the transcript details, when the text was spoken) and `spoken` (the reply will be read aloud,
+            so the model is asked for short plain speech).
 
     Returns:
         dict: The result of `brain.respond`, plus `seconds` and `images` (paths of the saved pictures).
@@ -330,7 +331,7 @@ def chat(body: dict):
     t0 = time.time()
     with lock:
         past = [{"role": m["role"], "content": m["content"]} for m in history()[-config.CHAT_HISTORY_MESSAGES :]]
-        out = brain.respond(parts, history=past)
+        out = brain.respond(parts, history=past, spoken=bool(body.get("spoken")))
         seconds = round(time.time() - t0, 1)
         ui = {
             "tool_calls": out.get("tool_calls", []),

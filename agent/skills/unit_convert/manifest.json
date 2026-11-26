@@ -1,0 +1,18 @@
+{
+  "name": "unit_convert",
+  "description": "Convert a quantity between units of length, mass, temperature, volume or speed, for example 5 miles to km.",
+  "version": "1.0",
+  "tier": "safe",
+  "effects": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "value": {"type": "number"},
+      "from_unit": {"type": "string", "description": "for example km, mi, kg, lb, c, f, l, gal, kmh, mph"},
+      "to_unit": {"type": "string"}
+    },
+    "required": ["value", "from_unit", "to_unit"]
+  },
+  "examples": ["how many kilometers is 5 miles", "convert 70 fahrenheit to celsius", "what is 2 liters in gallons"],
+  "entry": "skill.py:run"
+}

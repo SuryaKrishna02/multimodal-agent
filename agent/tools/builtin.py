@@ -1,4 +1,8 @@
-"""Built-in local tools. Each one is a plain function plus a JSON schema and a tier."""
+"""Built-in local tools. Each one is a plain function plus a JSON schema and a tier.
+
+The native skills (agent/skills/, Session 3) register at the end of this file, after every built-in tool, so a
+skill can never take a built-in tool's name.
+"""
 
 import ast
 import operator
@@ -7,7 +11,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from agent import config
+from agent import config, skills
 from agent.tools import BLOCKED, CONFIRM, tool
 
 SECRET_PATTERNS = (".ssh", ".env", "id_rsa", ".aws", "keychain", "credentials", ".netrc")
@@ -276,3 +280,4 @@ def delete_file(path: str) -> str:
 
 
 config.WORKSPACE.mkdir(parents=True, exist_ok=True)
+skills.load()

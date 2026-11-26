@@ -17,10 +17,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from agent import config, daemon, events, hotkey, serving, tasks, tools
+from agent import config, daemon, events, hotkey, mcp_client, serving, tasks, tools
 from agent.memory import episodic
 from agent.senses import audio, video
-from dashboard import always_on, chat
+from dashboard import always_on, chat, mcp, proactive, voice
 from evals import common as evals_common
 
 state = {"tier": config.TIER, "mic": None}
@@ -50,6 +50,8 @@ async def lifespan(_app):
     events.set_source("dashboard")
 
     threading.Thread(target=boot, daemon=True).start()
+    threading.Thread(target=voice.warm_up, daemon=True).start()
+    threading.Thread(target=mcp_client.start, daemon=True).start()  # the MCP servers whose tools are enabled
     try:
         hotkey.listen(lambda: tasks.screen_help())
     except Exception as e:  # noqa: BLE001
@@ -60,6 +62,9 @@ async def lifespan(_app):
 app = FastAPI(lifespan=lifespan)
 app.include_router(always_on.router)
 app.include_router(chat.router)
+app.include_router(voice.router)
+app.include_router(mcp.router)
+app.include_router(proactive.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

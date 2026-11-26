@@ -2,6 +2,8 @@
 # Updated 2026-11-06 for Session 2: the runtime dependencies of mlx-whisper (mlx, numba, scipy, tiktoken, ...).
 # mlx-whisper itself is in nodeps-macos.txt: it declares torch, which only its weight converter uses.
 # Direct dependencies and why: base.txt. Installed by scripts/setup.py.
+# Updated 2026-11-24 for Session 3: kokoro-onnx and mcp, with their dependencies (phonemizer, espeakng-loader,
+# dlinfo, joblib; mcp-types, PyJWT, cryptography, python-multipart, sse-starlette).
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -10,6 +12,9 @@ certifi==2026.10.23
 cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
+cryptography==50.0.2
+dlinfo==2.0.0
+espeakng-loader==0.2.4
 fastapi==0.162.0
 filelock==4.2.9
 flatbuffers==25.12.19
@@ -23,9 +28,13 @@ httpx2==2.16.0
 huggingface_hub==2.4.0
 idna==3.20
 jiwer==4.0.0
+joblib==1.6.0
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
+kokoro-onnx==0.6.1
 llvmlite==0.50.0
+mcp==2.3.0
+mcp-types==2.3.0
 mlx==0.32.4
 mlx-metal==0.32.4
 more-itertools==11.2.1
@@ -35,18 +44,21 @@ numpy==2.5.4
 onnxruntime==1.31.1
 opentelemetry-api==1.45.1
 packaging==26.3
+phonemizer==3.6.0
 pillow==13.0.0
 protobuf==7.36.2
 psutil==7.2.2
 pycparser==3.12
 pydantic==2.14.1
 pydantic_core==2.50.1
+PyJWT==2.15.1
 pynput==1.8.2
 pyobjc-core==12.2.2
 pyobjc-framework-ApplicationServices==12.2.2
 pyobjc-framework-Cocoa==12.2.2
 pyobjc-framework-CoreText==12.2.2
 pyobjc-framework-Quartz==12.2.2
+python-multipart==0.0.34
 PyYAML==6.0.3
 RapidFuzz==3.14.6
 referencing==0.37.0
@@ -57,6 +69,7 @@ scipy==1.18.1
 six==1.17.0
 sounddevice==0.5.6
 soundfile==0.14.0
+sse-starlette==3.7.1
 starlette==1.10.0
 tiktoken==0.14.0
 tqdm==4.70.1

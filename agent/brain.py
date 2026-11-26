@@ -25,6 +25,13 @@ see screenshots and use tools. Be brief and concrete. Use a tool only when it he
 Current time: {now}."""
 
 
+# Added to the system prompt when the reply will be spoken (a voice turn). Text to speech reads every symbol, and a
+# long answer is hard to follow by ear and to interrupt. `tts.speakable()` still cleans what gets through.
+SPOKEN = """
+The user spoke this request, and your reply will be read aloud. Answer in one to three short sentences of plain
+speech. Do not use markdown, lists, headings, tables, code, emoji or links. Offer more detail only if asked."""
+
+
 def system_prompt() -> str:
     """Return the system prompt with the current time filled in."""
     # Minute resolution on purpose: llama.cpp reuses the cached prefix of the previous
@@ -294,7 +301,13 @@ def approval_note(outcome: dict) -> dict:
     return {"role": "assistant", "content": f"Approval outcome: {text}"}
 
 
-def respond(user: list[dict], history: list[dict] | None = None, use_memory: bool = True, max_steps: int = 4) -> dict:
+def respond(
+    user: list[dict],
+    history: list[dict] | None = None,
+    use_memory: bool = True,
+    max_steps: int = 4,
+    spoken: bool = False,
+) -> dict:
     """A full turn: memories + tools.
 
     Args:
@@ -302,6 +315,8 @@ def respond(user: list[dict], history: list[dict] | None = None, use_memory: boo
         history (list[dict], optional): Earlier messages with `role` and `content`. Defaults to none.
         use_memory (bool, optional): Put the memories that match the text into the system prompt. Defaults to True.
         max_steps (int, optional): Model requests before the turn stops. Defaults to 4.
+        spoken (bool, optional): The reply will be read aloud: ask for short plain speech (`SPOKEN`). Defaults to
+            False.
 
     Returns:
         dict: `text`, `tool_calls`, `tokens` (the context budget), `tools_offered` and `memories` (the recalled
@@ -309,7 +324,7 @@ def respond(user: list[dict], history: list[dict] | None = None, use_memory: boo
     """
     query = " ".join(p["text"] for p in user if p["type"] == "text")
     names = tools.select(query or "help", config.MAX_TOOLS_PER_REQUEST)
-    system = system_prompt() + _waiting_calls()
+    system = system_prompt() + (SPOKEN if spoken else "") + _waiting_calls()
     hits = _recall(query, use_memory)
     lines = [f"({m['when']}, {m['kind']}) {m['text']}" for m in hits]
     msgs, used = fit_budget(system, lines, history or [], user, tools.schemas(names))

@@ -1,7 +1,8 @@
 """Doctor: what platform and accelerator did we detect, and does everything they need work?
 
     python scripts/doctor.py              # report only (instant)
-    python scripts/doctor.py --exercise   # also run the hooks: screen, speech, keep-awake, a notification, Whisper
+    python scripts/doctor.py --exercise   # also run the hooks: screen, speech, keep-awake, a notification, Whisper,
+                                          # Kokoro and playback
 
 Paste this output into your PR when you add a platform or accelerator.
 Standard library only, so it works on a machine where setup has not finished.
@@ -12,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -187,6 +189,7 @@ def exercise(plat, a) -> None:
         )
         row("ok", "server_args", " ".join(a.server_args()) or "(none)")
     exercise_always_on(plat, a)
+    exercise_voice(plat, a)
 
 
 def _awake(plat) -> tuple[str, str]:
@@ -218,6 +221,51 @@ def exercise_always_on(plat, a) -> None:
     if a:
         try_hook("transcribe", lambda: _whisper(plat, a))
     row("ok", "install_autostart", "not run: it changes your login items (cli.py daemon install)")
+
+
+def _play_silence(plat) -> tuple[str, str]:
+    """Play 0.3 s of silence through the OS hook, and stop it early once."""
+    import numpy as np
+    import soundfile as sf
+
+    with tempfile.TemporaryDirectory() as d:
+        wav = Path(d) / "silence.wav"
+        sf.write(wav, np.zeros(int(0.3 * config.TTS_SAMPLE_RATE), dtype=np.float32), config.TTS_SAMPLE_RATE)
+        start = time.monotonic()
+        played = plat.play_audio(wav)
+        while not played.done() and time.monotonic() - start < 5:
+            time.sleep(0.02)
+        stopped = plat.play_audio(wav)
+        stopped.stop()
+        time.sleep(0.1)
+    return ("ok" if played.done() and stopped.done() else "FAIL"), f"0.3 s played in {time.monotonic() - start:.2f} s"
+
+
+def _kokoro(a) -> tuple[str, str]:
+    """Speak a sentence with Kokoro and, when the accelerator has a speech model, read it back."""
+    from scipy.signal import resample_poly
+
+    from agent.voice import tts
+
+    start = time.monotonic()
+    audio = tts.synthesize("Testing one two three.")
+    took = time.monotonic() - start
+    detail = f"{len(audio) / config.TTS_SAMPLE_RATE:.1f} s of speech in {took:.2f} s (first call loads the model)"
+    if not a or not a.stt_pins:
+        return "ok", detail
+    text = a.transcribe(resample_poly(audio, 2, 3).astype("float32"), config.STT_LANGUAGE)  # 24 kHz -> 16 kHz
+    return ("ok" if "three" in text.lower() or "3" in text else "FAIL"), f"{detail}; Whisper heard {text!r}"
+
+
+def exercise_voice(plat, a) -> None:
+    """Run the Session 3 voice parts: Kokoro speech and the playback hook.
+
+    Args:
+        plat (Platform): The platform plug-in.
+        a (Accelerator | None): The accelerator plug-in, if any.
+    """
+    try_hook("kokoro (agent/voice/tts.py)", lambda: _kokoro(a))
+    try_hook("play_audio", lambda: _play_silence(plat))
 
 
 def main() -> int:

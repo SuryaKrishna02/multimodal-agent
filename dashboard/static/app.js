@@ -119,7 +119,7 @@ document.addEventListener("click", (e) => {
 });
 $("#lightbox").onclick = () => $("#lightbox").close();
 
-// --- Tabs (keys 1-9 switch tabs when you are not typing) --------------------
+// --- Tabs (keys 1-9 and 0 switch tabs when you are not typing) --------------
 const TAB_REFRESH = {};   // tab name -> function that reloads it when shown (always_on.js adds some)
 const TABS = $$("#tabs button");
 function showTab(name) {
@@ -160,7 +160,7 @@ document.addEventListener("keydown", (e) => {
   if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   if (e.key === "c") setChatHidden(!document.body.classList.contains("chat-hidden"));
   if (e.key === "d") setDetails(document.body.classList.contains("simple"));
-  const b = TABS[Number(e.key) - 1];
+  const b = /^[0-9]$/.test(e.key) ? TABS[e.key === "0" ? 9 : Number(e.key) - 1] : undefined;
   if (b) showTab(b.dataset.tab);
 });
 

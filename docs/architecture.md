@@ -72,8 +72,8 @@ flowchart TB
 | Microphone | A live or recorded clip |
 | Screen | A screenshot or a screen recording |
 | Hotkey | A global key combination, ctrl+alt+space. The OS plug-in provides it. |
-| CLI, `cli.py` | `serve`, `stop`, `dashboard`, `hotkey`, `note`, `look`, `chat`, `memory`, `record-clip`, `record-screen`, `smoke`, `doctor`, `evals` |
-| Dashboard | FastAPI on port 8765 with 9 tabs: chat, memory, tool approval, model switch, benchmark, daemon, evolution, tasks, evals |
+| CLI, `cli.py` | `serve`, `stop`, `dashboard`, `hotkey`, `note`, `look`, `chat`, `memory`, `record-clip`, `record-screen`, `smoke`, `doctor`, `evals`; Session 3 adds `say` and `wake` |
+| Dashboard | FastAPI on port 8765 with 10 tabs (keys 1 to 9, then 0): serving, senses, brain, memory, tools (with MCP servers), always on, evolve, tasks, voice, scorecard, and the chat beside them |
 
 ### 1 Serving: `agent/serving.py`
 
@@ -141,7 +141,7 @@ guard keeps them inside the sandbox. The shell guard blocks risky commands.
 | ---- | ------------ |
 | `agent/events.py` | `events.emit(kind, ...)` from every component. A SQLite table (`data/runtime/events.sqlite`), so the daemon, the dashboard and the CLI share one log, plus `events.jsonl`. Each event names its `source` process. The dashboard polls `/api/events`. |
 | `agent/sql.py` | Opens every SQLite file: commit, roll back, and always close. WAL mode lets one process read while another writes. |
-| `evals/` (9 Scorecard) | 15 components: the 10 of Session 1, plus `daemon`, `multimodal`, `consolidation`, `task3` and `task4`. Synthetic cases and your cases in `data/evals/`, scored against `config.THRESHOLDS`. |
+| `evals/` (Scorecard) | 23 components: the 10 of Session 1; `daemon`, `multimodal`, `consolidation`, `task3` and `task4` of Session 2; `tts`, `voice_stop`, `wake`, `proactive`, `skills`, `mcp_select`, `task5` and `task6` of Session 3. Synthetic cases and your cases in `data/evals/`, scored against `config.THRESHOLDS`. |
 | `scripts/` | `setup.py` downloads and verifies pinned assets. `doctor.py` detects the OS and GPU and checks hooks. `smoke_test.py` runs end to end with real models. Run them through `cli.py doctor`, `smoke` and `evals`. |
 | `tests/` and gates | `unittest` contract tests with no model and no GPU. `ruff check` and `ruff format`, `pyright`, `complexipy`. `test_plugin_contract.py` keeps OS and GPU code out of core modules. |
 
@@ -156,7 +156,7 @@ guard keeps them inside the sandbox. The shell guard blocks risky commands.
 | 4 Memory v1 | `agent/memory/episodic.py` | `memory` |
 | 5 Tools, CLI, hotkey | `agent/tools/`, `cli.py`, `agent/hotkey.py` | `tools` |
 | 6 Live tasks | `agent/tasks.py` | `task1`, `task2` (end-to-end) |
-| 7 Scorecard | `evals/run_all.py`, dashboard tab 9 | n/a |
+| 7 Scorecard | `evals/run_all.py`, dashboard tab 0 | n/a |
 
 ## Portability layer
 
@@ -174,7 +174,7 @@ Each plug-in folder holds a contract, a verified reference and a template:
 | Folder | Contract | Verified reference | Template | Hooks |
 | ------ | -------- | ------------------ | -------- | ----- |
 | `agent/accel/` | `base.py`, `Accelerator` | `metal.py`, Apple Silicon | `_template.py`, for CUDA, Vulkan or CPU | `download_for`, `server_args`, `server_memory_gb`, `transcribe` (Session 2) |
-| `agent/platforms/` | `base.py`, `Platform` and `Unsupported` | `macos.py` | `_template.py`, for Linux or Windows | `record_screen`, `synthesize_speech`, `start_hotkey`, and for Session 2 `keep_awake`, `notify`, `install_autostart`, `uninstall_autostart`, `spawn_background` |
+| `agent/platforms/` | `base.py`, `Platform` and `Unsupported` | `macos.py` | `_template.py`, for Linux or Windows | `record_screen`, `synthesize_speech`, `start_hotkey`, and for Session 2 `keep_awake`, `notify`, `install_autostart`, `uninstall_autostart`, `spawn_background`, and for Session 3 `play_audio` (a portable default: sounddevice) |
 
 Shared configuration: `config.py` holds ports, thresholds, paths and knobs, and `config.LLAMA_BUILD` pins the llama.cpp
 build. `pins.py` holds the sha256 of the model and VAD weights. The environment variables are `AGENT_TIER`,
@@ -283,3 +283,87 @@ flowchart TB
    was in flight runs again. Steps must be safe to run twice. A summary, for example, is found again by its window key.
 5. The job ends `done` or `failed`. The `daemon.action` event carries the reason and a summary to the dashboard feed. A
    finished brief also shows a desktop notification.
+
+## Session 3: voice, bolt-ons and what comes next
+
+Session 3 gives the agent a voice, lets it speak up on its own, and makes it extensible with native skills and MCP
+servers.
+
+```mermaid
+flowchart TB
+    mic["Microphone"]
+    wake["Wake word: agent/voice/wake.py<br/>mel, embedding, classifier"]
+    turn["Voice turn: agent/voice/turn.py<br/>record, Whisper, dashboard chat"]
+    brain["Brain: brain.respond()"]
+    reg["Tool registry: agent/tools/<br/>built-in tools, skills, MCP tools"]
+    skills["Native skills: agent/skills/<br/>manifest.json + skill.py"]
+    mcp["MCP client: agent/mcp_client.py<br/>labels, secrets, tiers"]
+    rem["Reminders MCP server<br/>mcp_servers/reminders/"]
+    remote["Other MCP servers<br/>stdio or remote HTTP"]
+    pro["Proactive: agent/proactive.py<br/>cool-down, feed, notify, speak"]
+    watch["Task 5: screen watcher"]
+    daemon["Daemon: reminder watcher"]
+    speak["Speaker: agent/voice/speaker.py<br/>Kokoro, one sentence at a time"]
+    tab["Dashboard tab<br/>Web Audio, Stop"]
+    local["play_audio hook<br/>this machine's speakers"]
+
+    mic --> wake --> turn --> brain
+    brain <--> reg
+    skills --> reg
+    mcp --> reg
+    mcp <--> rem
+    mcp <--> remote
+    watch --> pro
+    daemon -- "due_reminders" --> rem
+    daemon --> pro
+    brain -- "reply" --> speak
+    pro --> speak
+    speak -- "SSE chunks" --> tab
+    speak --> local
+
+    classDef sense fill:#e2f5ee,stroke:#12856a,color:#1d1d1b
+    classDef think fill:#e6effc,stroke:#2f6fd1,color:#1d1d1b
+    classDef tool fill:#fde9e6,stroke:#c0392b,color:#1d1d1b
+    classDef plugin fill:#eee9fb,stroke:#7048c9,stroke-dasharray:7 5,color:#1d1d1b
+    class mic,wake,turn sense
+    class brain,pro think
+    class reg,skills,mcp,rem,remote tool
+    class local plugin
+```
+
+### Components
+
+| File | What it does |
+| ---- | ------------ |
+| `agent/voice/tts.py` | Kokoro-82M through kokoro-onnx on the CPU, so the GPU stays free for Gemma. Turns markdown into plain sentences (`speakable`), cuts a reply into sentences (the first one short), and speaks words that espeak gets wrong from IPA (`config.PRONUNCIATIONS`). |
+| `agent/voice/speaker.py` | Writes each sentence to a WAV chunk and sends it where it can be heard: the dashboard tab when one listens (its heartbeat file says so), else the `play_audio` hook. A `voice.stop` event stops speech in every process. The events hold the times that the voice evals read. |
+| `dashboard/voice.py`, `static/voice.js` | A Server-Sent Events stream of the voice events, polled every 50 ms; the tab fetches each chunk and plays it with Web Audio, and reports when the first sound started and when a stop went silent. |
+| `agent/voice/wake.py` | "Hey Sanjaya": openWakeWord's two frozen models plus our classifier, in plain numpy, 80 ms at a time. Trained by `scripts/train_wake_word.py` ([WAKE_WORD.md](WAKE_WORD.md)). |
+| `agent/voice/turn.py` | A spoken turn: the wake word or Talk, record until a pause (the ambient Segmenter), Whisper, the dashboard chat (so approvals work), then speech. A spoken turn asks the model for short plain speech (`brain.SPOKEN`), and `tts.speakable()` removes markdown, symbols and emoji before Kokoro. The dashboard shows the state (waiting for the wake word, listening, thinking after `voice.recorded`, speaking) in the header. The reply is written and spoken in a worker thread while the wake detector keeps listening, so saying the wake word (or Talk) over the agent stops its speech and drops a reply that is still being written, on the tab and on this machine's speakers. |
+| `agent/proactive.py` | `alert()`: one key per alert and a cool-down, then the feed, a notification and speech. `check_reminders()` (the daemon calls it every 15 s) and `ScreenWatcher` (Task 5, run by the dashboard). |
+| `agent/skills/` | Native skills: a manifest (description, examples, input schema, tier, effects) checked by a JSON schema, and a Python entry. A skill that writes, runs code or uses the network cannot be `safe`. A skill with a bad manifest or code that fails to import is skipped and reported as `skills.error`; the other skills still load. |
+| `agent/mcp_client.py` | Reads a pasted `mcpServers` config. `command` is on-device, `url` is remote unless it is this machine. Secrets must be `${NAME}` and are read from the environment. Enabled tools join the registry as `<server>__<tool>` at tier `confirm` until the user changes it. One event loop thread keeps a session per server. |
+| `mcp_servers/reminders/server.py` | A tiny MCP server (the official SDK's `MCPServer`) with a SQLite file: add, list, due, complete, cancel. |
+| `dashboard/mcp.py`, `static/mcp.js` | The MCP panel of the Tools tab: paste, labels, connect, tools and tiers. |
+| `dashboard/proactive.py` | Task 5 on and off, and one check now. |
+
+### Where each Session 3 segment lives
+
+| Segment | Files | Eval (folder in `evals/`) |
+| ------- | ----- | ------------------------- |
+| Voice | `agent/voice/`, `dashboard/voice.py`, `scripts/train_wake_word.py` | `tts`, `voice_stop`, `wake` |
+| Proactive output | `agent/proactive.py`, `dashboard/proactive.py` | `proactive` |
+| Native skill interface | `agent/skills/` | `skills` |
+| MCP connectors | `agent/mcp_client.py`, `mcp_servers/reminders/`, `dashboard/mcp.py` | `mcp_select` |
+| Live tasks | `agent/tasks.py` (`check_screen`), `agent/proactive.py`, `agent/voice/turn.py` | `task5`, `task6` (end-to-end) |
+| Roadmap | [ROADMAP.md](ROADMAP.md) | n/a |
+
+### Data flow for Task 6, a voice-set reminder
+
+1. "Hey Sanjaya" wakes the loop (`wake.Detector.heard()`); any speech that plays stops.
+2. The request is recorded until a pause and transcribed by Whisper.
+3. The dashboard chat answers it: `tools.select()` offers `reminders__add_reminder` among the top 5, the model calls
+   it, `tools.check()` passes it (the user set it to `safe`), and the MCP client sends it to the reminders server.
+4. The reply is spoken in the dashboard tab, sentence by sentence.
+5. The daemon asks the server for due reminders every 15 s. A due one is spoken, shown as a notification and written
+   to the feed, then marked done.

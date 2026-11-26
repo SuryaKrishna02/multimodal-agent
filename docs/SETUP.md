@@ -9,9 +9,10 @@ Run the whole agent on your own machine. Everything stays on it: the model serve
 |---|---|
 | Machine | Verified: Apple Silicon Mac (M4, 24 GB, macOS 27.0.1). Other OSes and GPUs: see [PLATFORMS.md](PLATFORMS.md) |
 | Memory | 16 GB works with the E2B tier. 24 GB or more is better for E4B |
-| Disk | about 13 GB (both model tiers, the embedding model and Whisper large-v3-turbo) |
+| Disk | about 13 GB (both model tiers, the embedding model, Whisper large-v3-turbo, Kokoro and the wake-word models). Training your own wake word needs about 25 GB more, once ([WAKE_WORD.md](WAKE_WORD.md)) |
 | Python | 3.10 or newer (tested with 3.13.3) |
 | Optional | `ffmpeg` + `ffprobe` for screen-video input and the two synthetic video cases of the task2 eval (the doctor prints the install command for your OS) |
+| Optional | [Node.js](https://nodejs.org) for MCP servers started with `npx`, and [uv](https://docs.astral.sh/uv/) for those started with `uvx` (Session 3). The reminders server of this repo needs neither |
 
 If your OS or GPU has no plug-in yet, `setup.py` stops with a message naming the file to add.
 Adding one is a single-file PR: [CONTRIBUTING.md](../CONTRIBUTING.md).
@@ -29,13 +30,16 @@ python3 scripts/setup.py
 - Gemma 4 **E4B** and **E2B** (Q4_0, from Google's QAT checkpoints) + their Q8_0 image/audio projectors
 - **EmbeddingGemma-2** (Q8_0) + its projector, for memory search over text, images and audio
 - **Silero VAD** v6.2.3 (ONNX file only)
+- **Kokoro-82M** (int8 ONNX, 92 MB) and its 54 voices (28 MB), the agent's voice (Session 3), group `tts`
+- openWakeWord's two frozen feature models (2.4 MB), group `wake`. The "Hey Sanjaya" classifier itself is trained
+  on your machine: [WAKE_WORD.md](WAKE_WORD.md)
 - **Whisper large-v3-turbo** in MLX format (1.6 GB), for always-on listening. It is the `stt_pins` of your
   accelerator plug-in, so only an accelerator with a `transcribe` hook downloads it (on a Mac: Metal)
 - a `.venv` with the pinned packages (`requirements/lock-<os>.txt`, else `requirements/base.txt`)
 - the packages of `requirements/nodeps-<os>.txt`, installed with `--no-deps`. On macOS this is `mlx-whisper`:
   it declares `torch`, but only its weight converter uses it. The lock file pins what `transcribe` needs instead.
 
-Skip what you do not need: `python3 scripts/setup.py --only e2b embed vad whisper`.
+Skip what you do not need: `python3 scripts/setup.py --only e2b embed vad whisper tts wake`.
 Force a choice: `AGENT_ACCEL=<name>` or `AGENT_PLATFORM=<name>` (names: `cli.py doctor`).
 
 Then check what the agent detected, and that text, image and audio all work. Use the venv's Python
@@ -65,9 +69,9 @@ Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code,
 .venv/bin/python cli.py dashboard     # open http://127.0.0.1:8765 in Chrome
 ```
 
-The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 9
+The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 9, then 0,
 follow the session agenda. Session 1 has Serving, Senses, Brain, Memory and Tools. Session 2 adds Always on and Evolve.
-Tasks and Scorecard come last.
+Tasks come next, Session 3 adds Voice (9), and Scorecard (0) comes last.
 
 Press the number keys to switch tabs. The page is light only. The chat sits on the right. Press C to hide it and give
 the tabs more room. A bar at the bottom opens the Activity log (the event log). A dot on a tab lights up while that part
@@ -213,8 +217,32 @@ The soak test of the daemon runs for hours, so record it before the session. The
 - **`Apple could not verify llama-server`**: this happens only when a browser downloaded the
   binaries. `setup.py` downloads from Python, which does not set the quarantine flag.
 
-## Session 3 preview
+## Voice, skills and MCP (Session 3)
 
-Session 3 adds MCP connectors. Many MCP servers start with `npx` (needs [Node.js](https://nodejs.org))
-or `uvx` (needs [uv](https://docs.astral.sh/uv/)). Install these before Session 3 if you want to try
-third-party servers.
+**The voice plays in the dashboard tab.** Click **Voice off** at the top once after each page load (Chrome plays sound
+only after a click). In Google Meet, present the dashboard as a **Chrome tab** and turn on **Also share tab audio**: Meet
+shares only the audio of the presented tab. Without a dashboard tab, the agent speaks through this machine's speakers.
+
+```bash
+.venv/bin/python cli.py say "Hello, I am Sanjaya."    # speak; --local for this machine's speakers
+.venv/bin/python cli.py wake test                     # the wake word, live (after training it)
+```
+
+- **Talk to it:** in the Voice tab (key 9), press **Talk** (key T) or turn on **Wake word** and say "Hey Sanjaya".
+  The request and the reply appear in the chat. **Stop speaking** (key S) silences it.
+- **The wake word** is trained once on your machine, with about 40 clips of your voice: [WAKE_WORD.md](WAKE_WORD.md).
+- **MCP:** in the Tools tab, under MCP servers, paste a standard `mcpServers` config (the JSON that Claude Desktop,
+  Cursor or VS Code use). Write API keys as `"${NAME}"` and set `NAME` in the environment of the process that
+  connects: a key typed into the JSON is refused. Connect a server, tick the tools the model may use, and set each
+  tool's tier. Every tool starts as `confirm`.
+- **Task 6, a voice-set reminder:** the reminders server of this repo is in the list by default. Connect it, tick
+  `add_reminder`, set it to `safe`, then say "Hey Sanjaya, remind me to call Ravi in two minutes". The daemon checks
+  for due reminders every 15 s and speaks them; run `python cli.py daemon install` once after an update, so the
+  launchd daemon runs the new code.
+- **Task 5, proactive alerts:** in the Tasks tab, turn on **Watching**. When a test run fails on screen, the agent says
+  so out loud, shows a notification and writes it to the feed. The dashboard runs it, because the terminal that
+  started the dashboard holds the Screen Recording permission.
+- **Native skills** are folders in `agent/skills/` with a `manifest.json`. They load at start; see
+  `agent/skills/__init__.py` for the format and the rule that a skill which writes, runs code or uses the network
+  cannot be `safe`.
+- **What comes next:** [ROADMAP.md](ROADMAP.md) maps these components to pi, OpenClaw and Pi Durable.

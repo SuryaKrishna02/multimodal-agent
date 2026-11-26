@@ -26,6 +26,12 @@ Session 2 (always on and learning):
     python cli.py feedback 3 --bad "too long"          Task 4: feedback on brief 3
     python cli.py evolve reflect|versions|diff A B|rollback N|simulate --rounds 3
 
+Session 3 (voice, bolt-ons):
+    python cli.py say "Hello, I am Sanjaya."          speak through the dashboard tab if Voice is on there, else here
+    python cli.py say --local "..." | --voices         force this machine's speakers | list the Kokoro voices
+    python cli.py wake record --count 40               record your own "Hey Sanjaya" clips for training
+    python cli.py wake test                            listen and print each wake with its score
+
 Everything OS- or GPU-specific lives in agent/platforms/ and agent/accel/. Commands here call
 those plug-ins and never branch on the OS. Force a choice with AGENT_PLATFORM=<name> / AGENT_ACCEL=<name>.
 """
@@ -434,6 +440,95 @@ def get_parent(evolve) -> int:
     return v["parent"] or v["id"]
 
 
+def cmd_say(a):
+    """`say`: speak a text with Kokoro, through the dashboard tab when Voice is on there, else on this machine.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `text`, `voice`, `local` and `voices`.
+    """
+    from agent.voice import speaker, tts
+
+    if a.voices:
+        print("\n".join(tts.voices()))
+        return
+    if not a.text:
+        sys.exit('nothing to say: python cli.py say "Hello"')
+    show(speaker.speak(" ".join(a.text), reason="cli.py say", voice=a.voice, route="local" if a.local else None))
+
+
+def _record_wake_clips(count: int, seconds: float) -> None:
+    """Record `count` short clips of the wake phrase into `config.WAKE_USER_CLIPS`."""
+    import time
+
+    import numpy as np
+    import sounddevice as sd
+    import soundfile as sf
+
+    config.WAKE_USER_CLIPS.mkdir(parents=True, exist_ok=True)
+    print('Say "Hey Sanjaya" (SUN-juh-yuh) once per clip, when it says "now". Vary your distance and volume.')
+    for i in range(count):
+        input(f"[{i + 1}/{count}] press Enter, then speak...")
+        print("  now")
+        clip = sd.rec(int(seconds * config.SAMPLE_RATE), samplerate=config.SAMPLE_RATE, channels=1, dtype="float32")
+        sd.wait()
+        pcm = (np.clip(clip[:, 0], -1, 1) * 32767).astype(np.int16)
+        path = config.WAKE_USER_CLIPS / f"{time.strftime('%Y%m%d-%H%M%S')}-{i:02d}.wav"
+        sf.write(path, pcm, config.SAMPLE_RATE, subtype="PCM_16")
+        print(f"  saved {path.name} (peak {np.abs(clip).max():.2f}; under 0.05 is too quiet)")
+    print(f"{count} clips in {config.WAKE_USER_CLIPS}. Train again: python scripts/train_wake_word.py train")
+
+
+def _test_wake(seconds: float) -> None:
+    """Listen on the microphone and print each wake with its score."""
+    import time
+
+    import sounddevice as sd
+
+    from agent.voice import wake
+
+    detector, end = wake.Detector(), time.monotonic() + seconds
+    print(f'Listening for {seconds:.0f} s. Say "Hey Sanjaya". Ctrl-C stops.')
+    with sd.InputStream(samplerate=config.SAMPLE_RATE, channels=1, dtype="float32", blocksize=wake.FRAME) as stream:
+        while time.monotonic() < end:
+            block, _ = stream.read(wake.FRAME)
+            for score in detector.push(block[:, 0]):
+                if score >= detector.threshold:
+                    print(f"  wake  score {score:.2f}  at {time.strftime('%H:%M:%S')}")
+                elif score >= 0.1:
+                    print(f"  near  score {score:.2f}")
+
+
+def cmd_wake(a):
+    """`wake`: record your own clips of the wake phrase, or test the detector live.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `action`, `count` and `seconds`.
+    """
+    from agent.senses import audio
+
+    if audio.paused():
+        sys.exit("The microphone is paused: python cli.py listen ... or turn on Mic in the dashboard.")
+    if a.action == "record":
+        _record_wake_clips(a.count, a.seconds or 2.0)
+    else:
+        _test_wake(a.seconds or 60.0)
+
+
+def _session3_parsers(sub) -> None:
+    """Register the Session 3 commands."""
+    p = sub.add_parser("say", help="speak a text with Kokoro")
+    p.add_argument("text", nargs="*")
+    p.add_argument("--voice", help=f"a Kokoro voice (default {config.TTS_VOICE}); see --voices")
+    p.add_argument("--local", action="store_true", help="play on this machine even if a dashboard tab listens")
+    p.add_argument("--voices", action="store_true", help="list the voices and exit")
+    p.set_defaults(fn=cmd_say)
+    p = sub.add_parser("wake", help="the wake word: record your own clips, or test it live")
+    p.add_argument("action", choices=["record", "test"])
+    p.add_argument("--count", type=int, default=40, help="clips to record (default 40)")
+    p.add_argument("--seconds", type=float, help="seconds per clip (record, default 2) or to listen (test, default 60)")
+    p.set_defaults(fn=cmd_wake)
+
+
 def _session2_parsers(sub) -> None:
     """Register the Session 2 commands."""
     p = sub.add_parser("daemon", help="the always-on process")
@@ -503,6 +598,7 @@ def main():
     p.add_argument("--fps", type=float, default=2)
     p.set_defaults(fn=cmd_record_screen)
     _session2_parsers(sub)
+    _session3_parsers(sub)
     sub.add_parser("smoke", add_help=False).set_defaults(
         fn=lambda a: sys.exit(subprocess.call([sys.executable, "scripts/smoke_test.py", *a.rest]))
     )

@@ -174,4 +174,4 @@ def approve(call_id: int, yes: bool) -> dict:
     return {"tool": name, "args": args, **run(name, args, approved=True)}
 
 
-from agent.tools import builtin  # noqa: E402,F401  (registers the built-in tools)
+from agent.tools import builtin  # noqa: E402,F401  (registers the built-in tools, then the native skills)

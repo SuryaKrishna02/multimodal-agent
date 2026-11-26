@@ -1,7 +1,7 @@
 """One-time setup on any OS: pinned llama.cpp build for your accelerator, pinned models, Python venv.
 
     python3 scripts/setup.py                     # detect OS + accelerator automatically
-    python3 scripts/setup.py --only e2b vad      # skip the groups you do not need (e4b e2b embed vad whisper)
+    python3 scripts/setup.py --only e2b vad      # skip the groups you do not need (e4b e2b embed vad whisper tts wake)
     AGENT_ACCEL=cuda python3 scripts/setup.py    # force an accelerator (see: cli.py doctor)
 
 Everything is checksum-verified; re-running skips files that are already correct.
@@ -147,9 +147,9 @@ def main() -> None:
     ap.add_argument(
         "--only",
         nargs="+",
-        choices=["e4b", "e2b", "embed", "vad", "whisper"],
+        choices=["e4b", "e2b", "embed", "vad", "whisper", "tts", "wake"],
         metavar="GROUP",
-        help="download only these groups: e4b e2b embed vad whisper (default: all)",
+        help="download only these groups: e4b e2b embed vad whisper tts wake (default: all)",
     )
     only = ap.parse_args().only
     plat, a = platforms.current(), accel.current()

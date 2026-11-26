@@ -43,6 +43,15 @@ COMPONENTS = [
     "consolidation",
     "task3",
     "task4",
+    # Session 3
+    "tts",
+    "voice_stop",
+    "wake",
+    "proactive",
+    "skills",
+    "mcp_select",
+    "task5",
+    "task6",
 ]
 
 

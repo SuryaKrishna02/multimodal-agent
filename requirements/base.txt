@@ -15,3 +15,5 @@ psutil==7.2.2           # memory measurement
 jiwer==4.0.0            # word error rate
 fastapi==0.162.0        # dashboard backend
 uvicorn==0.54.0         # dashboard server
+kokoro-onnx==0.6.1     # Kokoro text to speech on onnxruntime (Session 3, agent/voice/tts.py)
+mcp==2.3.0             # the official Model Context Protocol SDK: our client and the reminders server (Session 3)

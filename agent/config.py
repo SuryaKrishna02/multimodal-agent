@@ -129,6 +129,91 @@ EVOLVE_GATE_MAX_INVENTED = 0  # distinct names or numbers the new version may in
 # --- Tools -------------------------------------------------------------------
 WORKSPACE = Path(os.environ.get("AGENT_WORKSPACE", ROOT / "data" / "workspace"))
 
+# --- Voice out (Session 3) ----------------------------------------------------
+# Kokoro-82M through kokoro-onnx on the CPU, so the GPU stays free for Gemma. Measured on the M4 (2026-11-24): int8
+# writes 1 s of speech in 0.11 s, the full-precision file in 0.23 s, and both had the same word error rate through
+# Whisper. Model files are pinned in agent/pins.py (setup group "tts").
+TTS_DIR = MODELS / "kokoro"
+TTS_MODEL = TTS_DIR / "kokoro-v1.0.int8.onnx"
+TTS_VOICES = TTS_DIR / "voices-v1.0.bin"
+TTS_VOICE = "af_heart"  # one of the 54 voices in voices-v1.0.bin; `python cli.py say --voices` lists them
+TTS_LANG = "en-us"  # espeak-ng language code for the phonemes
+TTS_SPEED = 1.0
+TTS_SAMPLE_RATE = 24000  # what Kokoro writes
+TTS_PROVIDERS = ["CPUExecutionProvider"]  # onnxruntime providers; CoreML is available on macOS but not measured yet
+TTS_MAX_CHUNK_CHARS = 160  # a sentence longer than this is cut at a comma
+# The first piece is cut shorter, because the time to first audio grows with its length (M4, after a few seconds idle:
+# 20 characters 0.21 s, 52 characters 0.35 to 0.45 s).
+TTS_FIRST_CHUNK_CHARS = 60
+# Words that espeak-ng says wrong, as IPA for Kokoro. espeak reads "Sanjaya" as "SAN-jay-uh"; the user says
+# "SUN-juh-yuh".
+PRONUNCIATIONS = {"sanjaya": "sˈʌndʒəjə"}
+VOICE_DIR = RUNTIME / "voice"  # one folder of WAV chunks per utterance; the dashboard tab fetches them from here
+VOICE_KEEP = 40  # utterance folders kept; older ones are deleted
+VOICE_TAB_FILE = RUNTIME / "voice_tab.json"  # the dashboard tab that plays audio writes its heartbeat here
+VOICE_TAB_ALIVE_S = 4.0  # a tab without a heartbeat for this long is gone, and speech plays on this machine instead
+VOICE_POLL_S = 0.05  # how often voice code looks for a new audio chunk or a stop request
+VOICE_FADE_MS = 30  # the tab fades out over this many milliseconds when speech is stopped
+# Time budget of one spoken turn, in seconds. The voice eval and the Voice tab compare measured times with it.
+LATENCY_BUDGET = {
+    "wake": 0.3,  # wake word fires after the phrase ends
+    "end_of_speech": 0.6,  # VAD silence that ends the request
+    "stt": 0.9,  # Whisper on a 3 s request (Session 2: real-time factor 0.30)
+    "reply": 2.5,  # Gemma 4 E4B reply with one tool call
+    "tts_first": 0.4,  # Kokoro writes the first sentence
+    "to_tab": 0.15,  # chunk reaches the tab and starts playing
+    "stop": 0.3,  # stop trigger to silence
+}
+
+# --- Wake word (Session 3) ---------------------------------------------------
+# "Hey Sanjaya": a custom openWakeWord model, trained by scripts/train_wake_word.py on Kokoro clips (docs/WAKE_WORD.md).
+WAKE_PHRASE = "hey sanjaya"
+WAKE_DIR = MODELS / "wakeword"
+WAKE_MODEL = WAKE_DIR / "hey_sanjaya.onnx"  # the trained classifier; the two frozen feature models sit beside it
+# Score per 80 ms frame that counts as a wake. openWakeWord's default is 0.5. Chosen on 2026-11-24 for the model trained
+# with 21 of the user's clips: at 0.9 its 6 held-out user clips (scores 0.976-0.978) still wake, and false wakes on
+# the 10.7 h validation set drop from 1.12 to 0.28 per hour. Check it again with new recordings (the wake eval).
+WAKE_THRESHOLD = 0.9
+WAKE_REFRACTORY_S = 2.0  # after a wake, ignore the phrase for this long, so one "Hey Sanjaya" wakes once
+VOICE_REQUEST_WAIT_S = 5.0  # after a wake, give up if no speech starts within this time
+VOICE_REQUEST_MAX_S = 15.0  # a spoken request ends here even without a pause
+WAKE_TRAIN_DIR = CACHE / "wakeword-train"  # the training venv, the downloaded data and the clips (about 25 GB)
+# Kokoro voices that never make a training clip. The wake eval speaks the phrase with them (and with the OS voices),
+# so it measures speakers that the model has never heard.
+WAKE_HELD_OUT_VOICES = ("af_nicole", "am_puck", "bf_lily", "bm_lewis", "hf_beta", "am_echo")
+# Near misses, spoken as negative training clips: each greeting with each name, except the phrase itself. Left out on
+# purpose: "hay" and "they" (they sound like "hey") and "Sandhya" (said almost like SUN-juh-yuh).
+# Your own "Hey Sanjaya" clips (`python cli.py wake record`), git-ignored. Training copies each one WAKE_USER_REPEAT
+# times into the positive clips; augmentation gives every copy a different room and noise. Measured 2026-11-24 with
+# 21 clips: at 5 copies (1% of the 10,000 Kokoro positives) the full model ignored the user's voice.
+WAKE_USER_CLIPS = ROOT / "data" / "wakeword" / "user"
+WAKE_USER_REPEAT = 50
+WAKE_USER_TEST_EVERY = 4  # every 4th usable recording is kept out of training, to test the model on your voice
+WAKE_NEAR_GREETINGS = ("hey", "say", "okay", "hi", "hello", "")
+WAKE_NEAR_NAMES = ("sanjaya", "sanjay", "sonia", "sonya", "sunny", "santa", "sunday", "anya", "ninja", "sangria", "")
+# Echo: without headphones the microphone also hears the agent, and the first model missed "Hey Sanjaya" when the
+# agent's voice was even 25% as loud as the user's (docs/VERIFICATION.md, barge-in). Training mixes these clips of
+# Kokoro speech in as background, next to the AudioSet clips (`train --echo`), so the model learns the phrase over the
+# agent's voice. Measured 2026-11-25: it helps under echo but doubles false wakes. The installed model is the echo2
+# run (2026-11-26, the user's choice); a plain `train` still makes the model without echo.
+WAKE_ECHO_CLIPS = 500  # about 10 s each; each counts WAKE_ECHO_DUPLICATION times, so half the backgrounds are speech
+WAKE_ECHO_DUPLICATION = 2  # the 1,000 AudioSet clips count once
+WAKE_ECHO_SECONDS = 10.0
+WAKE_ECHO_OTHER_VOICES = ("af_bella", "af_sarah", "am_michael", "bf_emma", "bm_george")  # none of them held out
+
+# --- MCP and native skills (Session 3) ----------------------------------------
+MCP_CONFIG = RUNTIME / "mcp.json"  # the pasted mcpServers config, the enabled tools and their tiers (git-ignored)
+MCP_DEFAULT_TIER = "confirm"  # every MCP tool starts here: a server's annotations are hints from code we do not control
+MCP_CONNECT_TIMEOUT_S = 60.0  # start a server and list its tools (npx and uvx may download the server first)
+MCP_CALL_TIMEOUT_S = 60.0  # one tool call
+REMINDERS_SERVER = "reminders"  # the name of the reminders MCP server in the config; the daemon polls it
+REMINDER_POLL_S = 15.0  # how often the daemon asks the reminders server which reminders are due
+ALERT_COOLDOWN_S = 300.0  # proactive output: an alert with the same key is not repeated within this time
+# Task 5: the screen watcher looks every WATCH_EVERY_S, skips a screen that did not change (SCREEN_CHANGE_THRESHOLD),
+# and asks Gemma whether WATCH_CONDITION is on screen.
+WATCH_EVERY_S = 5.0
+WATCH_CONDITION = "a test run that failed: failing tests, a FAILED summary, or a traceback from a test"
+
 # --- Interfaces --------------------------------------------------------------
 DASHBOARD_PORT = 8765
 CHAT_DIR = RUNTIME / "chats"  # the dashboard chat sessions, one JSON file each, kept over a restart
@@ -175,4 +260,18 @@ THRESHOLDS = {
     "task4.test_gain": (">=", 0.10),  # held-out days: the reflection never saw them
     "task4.regression_rate": ("<=", 0.10),
     "task4.locked_edits": ("<=", 0),
+    # Session 3. Set before the first run, from the plan the user approved on 2026-11-24; not tuned to the results.
+    "tts.first_audio_p95_s": ("<=", 0.8),
+    "tts.wer": ("<=", 0.10),
+    "voice_stop.stop_p95_ms": ("<=", 300.0),
+    "wake.miss_rate": ("<=", 0.10),
+    "wake.false_wakes_per_hour": ("<=", 0.5),
+    "proactive.false_alert_rate": ("<=", 0.10),
+    "proactive.missed_alert_rate": ("<=", 0.10),
+    "skills.fire_recall": (">=", 0.80),
+    "skills.false_fire_rate": ("<=", 0.10),
+    "mcp_select.sel_acc_40": (">=", 0.80),
+    "task5.detect_rate": (">=", 0.80),
+    "task5.false_alert_rate": ("<=", 0.10),
+    "task6.success_rate": (">=", 0.80),
 }

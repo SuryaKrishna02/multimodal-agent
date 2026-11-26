@@ -24,8 +24,60 @@ class Handle(Protocol):
         """End it."""
 
 
+class Playback(Handle, Protocol):
+    """Sound that a hook plays, which the caller can stop early."""
+
+    def done(self) -> bool:
+        """Return True once the sound has ended or was stopped."""
+        ...
+
+
 class Unsupported(RuntimeError):
     """This OS plug-in does not implement the requested hook (yet)."""
+
+
+class _StreamPlayback:
+    """Plays one decoded sound through a sounddevice output stream (the default `play_audio`)."""
+
+    def __init__(self, sd, data, rate: int):
+        """Open the stream and start it.
+
+        Args:
+            sd (module): The sounddevice module, imported by the caller so this file imports on any machine.
+            data (numpy.ndarray): Float32 samples, shape (frames, channels).
+            rate (int): Sample rate in Hz.
+        """
+        self.sd, self.data, self.pos, self.stopping = sd, data, 0, False
+        self.stream = sd.OutputStream(
+            samplerate=rate, channels=data.shape[1], dtype="float32", latency="low", callback=self._fill
+        )
+        self.stream.start()
+
+    def _fill(self, out, frames, _time, _status) -> None:
+        """Copy the next samples to the sound card; stop the stream after the last one, or when asked to."""
+        n = 0 if self.stopping else min(frames, len(self.data) - self.pos)
+        out[:n] = self.data[self.pos : self.pos + n]
+        out[n:] = 0
+        self.pos += n
+        if self.stopping or self.pos >= len(self.data):
+            raise self.sd.CallbackStop
+
+    def stop(self) -> None:
+        """Cut the sound off at the next audio buffer (a few ms). `abort()` would block for about 130 ms."""
+        self.stopping = True
+
+    def done(self) -> bool:
+        """Tell whether the sound has ended, and close the stream once it has.
+
+        Returns:
+            bool: True once the last sample played or the stream stopped after `stop()`.
+        """
+        if self.stream.closed:
+            return True
+        if self.stream.active:
+            return False
+        self.stream.close()
+        return True
 
 
 def needs_override(fn):
@@ -169,6 +221,23 @@ class Platform:
             )
         return proc.pid
 
+    # --- Voice (Session 3) ------------------------------------------------------
+    def play_audio(self, path: Path) -> Playback:
+        """Start playing an audio file on this machine's speakers, and return at once.
+
+        Speech normally plays in the dashboard tab, because Google Meet shares only the audio of the presented tab.
+        This hook speaks when no tab listens, for example an alert while nobody presents. `stop()` must end the
+        sound within about 50 ms, because stopping speech is part of the voice eval.
+
+        Default: one PortAudio output stream through sounddevice, which covers macOS, Windows and Linux. It starts in
+        about 50 ms on an M4; macOS `afplay` needs about 1 s per file, which leaves gaps between sentences.
+        """
+        import sounddevice as sd
+        import soundfile as sf
+
+        data, rate = sf.read(str(path), dtype="float32", always_2d=True)
+        return _StreamPlayback(sd, data, rate)
+
     # --- Documentation helpers -------------------------------------------------
     def permission_notes(self) -> list[tuple[str, str]]:
         """(permission, what it is needed for) pairs shown by `cli.py doctor`."""
@@ -192,4 +261,5 @@ HOOKS = (
     "install_autostart",
     "uninstall_autostart",
     "spawn_background",
+    "play_audio",
 )

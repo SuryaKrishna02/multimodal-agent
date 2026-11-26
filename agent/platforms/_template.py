@@ -42,6 +42,8 @@ class MyOS(Platform):  # one Platform subclass per file
     # def install_autostart(self, label, cmd, cwd, log) -> Path: ...   # systemd user unit, Task Scheduler...
     # def uninstall_autostart(self, label) -> bool: ...
     # def spawn_background(self, cmd, cwd, log) -> int: ...            # only if the default does not detach
+    # Session 3 (voice).
+    # def play_audio(self, path): ...                    # only if sounddevice (PortAudio) cannot play here
 
     # def start_hotkey(self, combo, on_press): ...      # only if pynput does not work here
     # def hotkey_warning(self) -> str | None: ...       # permissions that silently block hotkeys

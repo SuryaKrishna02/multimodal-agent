@@ -5,9 +5,11 @@ with open models. Built for a three-part coding series of the Multimodal AI Grou
 [Cohere Labs Open Science Community](https://labscommunity.cohere.com/home).
 
 - Inference: [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`, pinned and checksummed ([docs/SETUP.md](docs/SETUP.md)). Verified on Apple Metal. Other OSes and GPUs plug in as single files ([CONTRIBUTING.md](CONTRIBUTING.md))
-- Model: Gemma 4 **E4B** (default) or **E2B**: text, image, audio and screen video (sampled frames, no soundtrack) in; text out (no speech output)
+- Model: Gemma 4 **E4B** (default) or **E2B**: text, image, audio and screen video (sampled frames, no soundtrack) in; text out
+- Voice: Kokoro-82M (ONNX, on the CPU) speaks the replies in the dashboard tab; a "Hey Sanjaya" wake word trained on your machine
 - Memory search: EmbeddingGemma-2 (text, image and audio in one vector space)
 - Always-on listening: Whisper large-v3-turbo on MLX (Apple Silicon), behind an accelerator hook
+- Bolt-ons: native skills (a manifest per skill) and an MCP client that loads a standard `mcpServers` config
 - Everything else is plain Python you can read in one sitting
 
 Each component has an eval: test cases, a metric, a pass threshold and a script. The cases are synthetic (generated, so
@@ -22,6 +24,7 @@ python3 scripts/setup.py                      # detects your OS + GPU; pinned bi
 .venv/bin/python cli.py smoke                 # text, image, audio, tools: ALL PASS?
 .venv/bin/python cli.py dashboard             # http://127.0.0.1:8765
 .venv/bin/python cli.py daemon start          # Session 2: the always-on process (see docs/SETUP.md)
+.venv/bin/python cli.py say "Hello"           # Session 3: the voice (turn on Voice in the dashboard to hear it there)
 ```
 
 On Windows the Python is `.venv\Scripts\python.exe`. For the machines that work today, and the machines that contributors can add, see
@@ -52,26 +55,37 @@ agent/
   tasks.py           Task 1 (voice note), Task 2 (screen help), Task 3 (recall), Task 4 (daily brief)
   events.py          event log in SQLite, shared by the daemon, the dashboard and the CLI
   sql.py             opens every SQLite file and always closes it
+  voice/tts.py       Kokoro text to speech, one sentence at a time (Session 3)
+  voice/speaker.py   speech to the dashboard tab or this machine; stopping it from any process (Session 3)
+  voice/wake.py      the "Hey Sanjaya" wake word: three small ONNX models, 80 ms at a time (Session 3)
+  voice/turn.py      a spoken turn: wake or Talk, record, Whisper, the chat, speech (Session 3)
+  proactive.py       alerts with a cool-down: feed, notification, speech; due reminders; Task 5 watcher (Session 3)
+  skills/            native skills: manifest.json + skill.py per folder (Session 3)
+  mcp_client.py      MCP client: labels, ${NAME} secrets, enabled tools and tiers (Session 3)
+mcp_servers/reminders/  a tiny reminders MCP server, the other side of the protocol (Task 6)
 dashboard/           FastAPI + one HTML page; one tab per component, plus tasks and the scorecard
   chat.py            the chat: text, picture, screen or voice in; reply with recalled memories; kept over restarts
+  voice.py, mcp.py, proactive.py   Session 3: the voice stream, the MCP panel, Task 5
 cli.py               every action from the terminal
 evals/<component>/   case format (docstring), loader, scorer
 evals/synthetic/     generates the synthetic cases (speech, screenshots, tool calls, memories)
 evals/cases.py       add your own cases, show what exists
 evals/run_all.py     the scorecard
 data/evals/          synthetic/ (generated) and user/ (yours), git-ignored
-docs/                SETUP, PLATFORMS, EVALS, architecture.md (diagram), VERIFICATION, BACKLOG, index.html + session-N-primer.html (slides)
+docs/                SETUP, PLATFORMS, EVALS, architecture.md (diagram), VERIFICATION, WAKE_WORD, ROADMAP, BACKLOG, index.html + session-N-primer.html (slides)
 CONTRIBUTING.md      add an OS or a GPU backend with one file
 tests/               plug-in contract tests (stdlib only)
-scripts/             setup.py, doctor.py, smoke_test.py, soak.py (hours of daemon load)
-requirements/        base.txt (portable pins), lock-<os>.txt, nodeps-<os>.txt, dev.txt (ruff, pyright, complexipy)
+scripts/             setup.py, doctor.py, smoke_test.py, soak.py (hours of daemon load), train_wake_word.py (+ wakeword/)
+requirements/        base.txt (portable pins), lock-<os>.txt, nodeps-<os>.txt, dev.txt (ruff, pyright, complexipy), wakeword-train.txt
 ```
 
 ## Status
 
-Session 1 (the core loop) is complete. Session 2 (always on and learning) is on the branch `feature/session_2`:
-the daemon with checkpoints, consolidation, multimodal memory, self-evolution, and Tasks 3 and 4. Session 3 (voice,
-skills, MCP) comes next. [docs/VERIFICATION.md](docs/VERIFICATION.md) lists what we tested and what we found.
+Sessions 1 (the core loop) and 2 (always on and learning) are complete. Session 3 (voice, bolt-ons and what comes
+next) is on the branch `feature/session_3`: Kokoro speech in the dashboard tab, the "Hey Sanjaya" wake word, proactive
+alerts, native skills, the MCP client with a reminders server, and Tasks 5 and 6. [docs/ROADMAP.md](docs/ROADMAP.md)
+maps the components to pi, OpenClaw and Pi Durable. [docs/VERIFICATION.md](docs/VERIFICATION.md) lists what we tested
+and what we found.
 
 ## Slides
 

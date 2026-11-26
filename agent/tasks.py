@@ -211,3 +211,49 @@ def daily_brief(day_start: float | None = None) -> dict:
     mems = day_memories(day_start)
     day = time.strftime("%Y-%m-%d", time.localtime(day_start or time.time()))
     return {**evolve.write_brief(mems, day=day), "memories": mems}
+
+
+# --- Task 5: proactive alerts from the screen -------------------------------------------------
+
+# The model reports what it sees; the code decides whether to speak. A first version let the model answer
+# "alert: true or false", and it raised an alert for a script's ImportError (docs/VERIFICATION.md, 2026-11-25).
+ALERT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "program": {"type": "string"},
+        "failed_tests": {"type": "array", "items": {"type": "string"}},
+        "say": {"type": "string"},
+    },
+    "required": ["program", "failed_tests", "say"],
+}
+ALERT_PROMPT = """You watch the user's screen. The user wants to hear about this: {condition}.
+In `program`, say what produced the text on the screen: a test runner (pytest, unittest, jest, go test...), a script,
+a server, git, an editor, or something else.
+In `failed_tests`, list the names of the tests that a test runner on the screen reports as failed. A traceback from
+running a script, a server error, a merge conflict, passing tests, or code that only defines tests is not a failed
+test: then leave the list empty.
+If the list is not empty, write `say`: one short sentence to say out loud that names the failed test. Else leave it
+empty."""
+
+
+def check_screen(img=None, condition: str = config.WATCH_CONDITION) -> dict:
+    """Task 5: decide whether the screen shows the condition that the user wants to hear about.
+
+    Args:
+        img (PIL.Image.Image | None, optional): A screenshot. Defaults to a new capture.
+        condition (str, optional): What to watch for. Defaults to `config.WATCH_CONDITION`.
+
+    Returns:
+        dict: `alert` (True when the model names at least one failed test), `what` (those names), `say`, `program`,
+            `failed_tests`, `screenshot` (the saved path) and the request info.
+    """
+    img = img or screen.capture()
+    path = screen.save(img)
+    parts = [brain.part("image", img), brain.part("text", ALERT_PROMPT.format(condition=condition))]
+    data, info = brain.ask_json(parts, ALERT_SCHEMA)
+    data = data or {"program": "", "failed_tests": [], "say": ""}
+    failed = [t for t in data["failed_tests"] if str(t).strip()]
+    alert = {"alert": bool(failed), "what": ", ".join(failed), "say": data["say"] if failed else ""}
+    result = {**data, **alert, "screenshot": str(path), **info}
+    events.emit("task5.check", **{k: v for k, v in result.items() if k != "tokens"})
+    return result

@@ -22,6 +22,9 @@
     <span class="stat" title="Language model server. It reads text, images and audio."><i id="llm-dot" class="dot"></i>Language model <span id="llm-mem" class="muted"></span></span>
     <span class="stat" title="Embedding server. It powers memory search."><i id="emb-dot" class="dot"></i>Embeddings <span id="emb-mem" class="muted"></span></span>
     <button id="mic-switch" class="mic" role="switch" aria-checked="true" title="Pause or allow the microphone everywhere. The agent only records when you press Record.">Mic ready</button>
+    <button id="voice-switch" class="mic paused" role="switch" aria-checked="false" title="Play the agent's voice in this tab. Chrome needs one click before a page may play sound. In Google Meet, present this tab and turn on its audio.">Voice off</button>
+    <span class="voice-state" data-state="idle" hidden role="status" aria-live="polite"><span class="vs-anim" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="vs-label"></span></span>
+    <button id="voice-stop" class="small danger" hidden title="Stop speaking now (key S)">Stop speaking</button>
     <button id="detail-switch" class="small" role="switch" aria-checked="false" title="Show or hide the extra cards, tables and explanations on every tab (key D)">Show details</button>
     <button id="chat-toggle" class="small" aria-controls="chat" title="Show or hide the chat (key C)">Hide chat</button>
   </div>
@@ -41,7 +44,8 @@
       <button role="tab" data-tab="daemon"><span class="tab-title"><kbd>6</kbd>Always on<i class="ping" data-activity="daemon"></i><i id="daemon-dot" class="dot" title="Daemon"></i></span><span class="tab-sub">Runs on its own</span></button>
       <button role="tab" data-tab="evolve"><span class="tab-title"><kbd>7</kbd>Evolve<i class="ping" data-activity="evolve"></i></span><span class="tab-sub">Learns from you</span></button>
       <button role="tab" data-tab="tasks"><span class="tab-title"><kbd>8</kbd>Tasks<i class="ping" data-activity="tasks"></i></span><span class="tab-sub">Run the agent</span></button>
-      <button role="tab" data-tab="scorecard"><span class="tab-title"><kbd>9</kbd>Scorecard</span><span class="tab-sub">How well it works</span></button>
+      <button role="tab" data-tab="voice"><span class="tab-title"><kbd>9</kbd>Voice<i class="ping" data-activity="voice"></i></span><span class="tab-sub">Speaks out loud</span></button>
+      <button role="tab" data-tab="scorecard"><span class="tab-title"><kbd>0</kbd>Scorecard</span><span class="tab-sub">How well it works</span></button>
     </div>
 
     <div class="panel" id="panel-serving" role="tabpanel">
@@ -159,6 +163,19 @@
         <div class="table-wrap scroll-y"><table id="tool-calls"><thead><tr><th>Time</th><th>Tool</th><th>Arguments</th>
           <th>Status</th><th>Result or reason</th></tr></thead><tbody></tbody></table></div>
         <div class="empty-note">No tool calls yet. Try asking the chat "What time is it?".</div></div>
+      <div class="card"><h3>MCP servers</h3>
+        <p class="hint">Paste a standard <code>mcpServers</code> config, the same JSON that Claude Desktop, Cursor or VS Code use.
+          A server with <code>command</code> runs on this machine; one with <code>url</code> is remote, and every call to it
+          leaves this machine. API keys stay in environment variables: write <code>"${NAME}"</code> in <code>env</code> or
+          <code>headers</code>. Each tool starts as <span class="tag confirm">confirm</span>, because a server's own hints
+          come from code we do not control.</p>
+        <div id="mcp-servers"></div>
+        <details class="more"><summary>Paste a config</summary>
+          <textarea id="mcp-config" rows="9" spellcheck="false" aria-label="mcpServers config"></textarea>
+          <div class="row"><button id="mcp-save" class="primary" data-busy="Checking…">Use this config</button></div>
+          <pre id="mcp-problems" class="step-bad" hidden></pre>
+        </details>
+      </div>
       <div class="card detail"><h3>Available tools</h3>
         <p class="hint"><span class="tag plain">guarded</span> means an extra check also reads the arguments of each call.</p>
         <div class="table-wrap"><table id="tool-list"><thead class="sr-only"><tr><th>Tool</th><th>Checks</th><th>What it does</th></tr></thead><tbody></tbody></table></div></div>
@@ -248,6 +265,55 @@
         <form id="feedback-form" class="row" hidden style="margin-top:10px"><input id="feedback-text" aria-label="Feedback" placeholder="For example: too long, and put the deadlines first">
           <button type="button" data-rating="1">👍 Good</button><button type="button" data-rating="-1" class="primary">Send feedback</button></form>
         <div id="task4-reflect" class="result"></div></div>
+      <div class="card"><h3>Task 5: speak up when a test fails</h3>
+        <p class="hint">The agent looks at the screen every few seconds. When the screen changed, Gemma checks it for a failed
+          test run, and a match is spoken, shown as a notification and written to the feed with the reason.</p>
+        <div class="row"><button id="t5-switch" class="mic paused" role="switch" aria-checked="false">Watching off</button>
+          <button id="t5-check" data-busy="Looking…">Check the screen now</button></div>
+        <div id="t5-out" class="result"></div></div>
+    </div>
+
+    <div class="panel" id="panel-voice" role="tabpanel">
+      <div class="page-head"><h2>Voice</h2>
+        <p>The agent speaks with Kokoro, a small text-to-speech model that runs on this machine's CPU. A reply is
+          spoken one sentence at a time, so the first sentence plays while the next one is written. The sound plays in
+          this tab, because Google Meet shares only the audio of the tab that you present.</p></div>
+
+      <div class="card"><h3>Say something</h3>
+        <p class="hint" id="voice-route">Turn on "Voice" at the top to play the sound in this tab. Without it, the agent speaks through this machine's speakers.</p>
+        <form id="voice-form" class="row">
+          <input id="voice-text" aria-label="Text to speak" value="Hello, I am Sanjaya. I run on this laptop, and I can speak while I think.">
+          <select id="voice-voice" aria-label="Voice"></select>
+          <button class="primary" data-busy="Speaking…">Speak</button>
+        </form>
+      </div>
+
+      <div class="card"><h3>Talk to it</h3>
+        <p class="hint">Say "Hey Sanjaya" and then your request, or press Talk (key T) and speak. Your request and the reply
+          appear in the chat, and the reply is spoken. Saying "Hey Sanjaya" while the agent speaks stops it; without
+          headphones the agent's own voice can drown out the wake word, so the Stop button (key S) is the sure way.</p>
+        <div class="row">
+          <button id="wake-switch" class="mic paused" role="switch" aria-checked="false" title="Listen for the wake word on this machine's microphone">Wake word off</button>
+          <button id="talk-btn" class="primary" title="Start a spoken request now (key T)">Talk</button>
+          <span id="wake-status" class="muted"></span>
+        </div>
+        <span class="voice-state big" data-state="idle" hidden role="status" aria-live="polite"><span class="vs-anim" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="vs-label"></span></span>
+
+      </div>
+
+      <div class="card"><h3>Where the time goes</h3>
+        <p class="hint">Each row is one thing the agent said. The bar shows the time until the first sound and how long each sentence took to write. Gray marks show the budget in <code>config.LATENCY_BUDGET</code>.</p>
+        <div id="voice-tiles" class="tiles"></div>
+        <div class="table-wrap"><table id="voice-table"><thead><tr><th>Time</th><th>Said</th><th>Where</th>
+          <th class="num">First sentence written</th><th class="num">First sound</th><th class="num">Stopped after</th></tr></thead><tbody></tbody></table></div>
+        <div class="empty-note">Nothing spoken yet. Press "Speak".</div>
+      </div>
+
+      <div class="card detail"><h3>How stopping works</h3>
+        <p class="hint">The Stop button (or the key S) writes a <code>voice.stop</code> event. Every process that is speaking
+          checks for it before the next sentence, and this tab fades its sound out over a few milliseconds. The agent does not stop
+          when the microphone hears just any voice, because its own voice from the speakers reaches the microphone too.</p>
+      </div>
     </div>
 
     <div class="panel" id="panel-scorecard" role="tabpanel">
@@ -316,5 +382,7 @@
 <output id="toast"></output>
 <script src="/static/app.js"></script>
 <script src="/static/always_on.js"></script>
+<script src="/static/voice.js"></script>
+<script src="/static/mcp.js"></script>
 </body>
 </html>

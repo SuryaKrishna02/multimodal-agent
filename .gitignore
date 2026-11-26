@@ -227,6 +227,8 @@ data/workspace/
 evals/results/
 # Eval cases: synthetic ones are generated, yours may hold voice and screenshots
 data/evals/
+# Your own wake-word recordings (python cli.py wake record): your voice stays on this machine
+data/wakeword/
 
 # Local tooling and AI-session files (kept out of the repository)
 AGENTS.md

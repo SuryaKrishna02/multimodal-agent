@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from agent import config
-from evals.synthetic import audio, day, screens, structured, text
+from evals.synthetic import alerts, audio, bolt_ons, day, screens, structured, text, voice
 
 BUILDERS: dict[str, Callable[[Path], None]] = {
     "tools": text.build_tools,
@@ -33,6 +33,14 @@ BUILDERS: dict[str, Callable[[Path], None]] = {
     "consolidation": day.build_consolidation,
     "task3": day.build_task3,
     "task4": day.build_task4,
+    # Session 3 (voice_stop builds its cases in code)
+    "tts": voice.build_tts,
+    "wake": voice.build_wake,
+    "task6": voice.build_task6,
+    "proactive": alerts.build_proactive,
+    "task5": alerts.build_task5,
+    "skills": bolt_ons.build_skills,
+    "mcp_select": bolt_ons.build_mcp_select,
 }
 MARKER = ".version"
 

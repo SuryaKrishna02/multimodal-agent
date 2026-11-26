@@ -13,6 +13,9 @@ E4B_REV = "a69f018d7678a2b9f5e705f8903d6fb29b9b25dc"  # ggml-org/gemma-4-E4B-it-
 E2B_REV = "6938c58e698502037401a5f19f6905f2fb2f7dee"  # ggml-org/gemma-4-E2B-it-GGUF
 EMB_REV = "58faf90940886df2d62be555c8765d00dac362c5"  # ggml-org/embeddinggemma-2-GGUF
 SILERO_TAG = "v6.2.3"
+KOKORO_TAG = "model-files-v1.0"  # GitHub release of thewh1teagle/kokoro-onnx
+KOKORO = f"https://github.com/thewh1teagle/kokoro-onnx/releases/download/{KOKORO_TAG}"
+OWW = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1"  # the frozen wake-word feature models
 
 
 @dataclass(frozen=True)
@@ -23,13 +26,13 @@ class Pin:
         url (str): Where to download the file.
         dest (str): Path of the file under `.cache/`.
         sha256 (str): Expected checksum of the file.
-        group (str): "e4b", "e2b", "embed" or "vad", so that setup can fetch a subset.
+        group (str): "e4b", "e2b", "embed", "vad", "tts" or "wake", so that setup can fetch a subset.
     """
 
     url: str
     dest: str  # path under .cache/
     sha256: str
-    group: str  # "e4b", "e2b", "embed" or "vad": setup can fetch a subset
+    group: str  # "e4b", "e2b", "embed", "vad", "tts" or "wake": setup can fetch a subset
 
 
 PINS = [
@@ -74,6 +77,32 @@ PINS = [
         "silero_vad.onnx",
         "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
         "vad",
+    ),
+    # Kokoro-82M for speech output. Hashed from the downloaded files on 2026-11-24 (the release lists no digest).
+    Pin(
+        f"{KOKORO}/kokoro-v1.0.int8.onnx",
+        "models/kokoro/kokoro-v1.0.int8.onnx",
+        "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb",
+        "tts",
+    ),
+    Pin(
+        f"{KOKORO}/voices-v1.0.bin",
+        "models/kokoro/voices-v1.0.bin",
+        "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+        "tts",
+    ),
+    # openWakeWord's two frozen stages: audio -> mel spectrogram -> Google's speech embedding. Hashed 2026-11-24.
+    Pin(
+        f"{OWW}/melspectrogram.onnx",
+        "models/wakeword/melspectrogram.onnx",
+        "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f",
+        "wake",
+    ),
+    Pin(
+        f"{OWW}/embedding_model.onnx",
+        "models/wakeword/embedding_model.onnx",
+        "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f",
+        "wake",
     ),
 ]
 

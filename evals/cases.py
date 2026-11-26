@@ -431,6 +431,9 @@ def _add_parsers(sub) -> None:
     p.add_argument("--moment", nargs=2, action="append", required=True, metavar=("SECONDS", "LABEL"))
     p.set_defaults(handler=add_screen)
     _add_session2_parsers(sub)
+    from evals import cases3  # here, not at the top: cases3 imports this module's helpers
+
+    cases3.add_parsers(sub)
 
 
 def _add_session2_parsers(sub) -> None:

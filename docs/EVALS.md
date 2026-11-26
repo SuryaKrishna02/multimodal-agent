@@ -146,6 +146,40 @@ and queues a replay of the synthetic conversation every 5 minutes. The `daemon` 
 **The judges share the writer's blind spots.** Consolidation faithfulness and your own Task 4 preferences are judged by
 Gemma 4, the same model family that wrote the text. A judge can miss what the writer missed. Read the failed claims.
 
+## Session 3 evals
+
+| Eval | Level | What it measures | How |
+|---|---|---|---|
+| `tts` | component | Time until Kokoro has the first spoken piece (median and 95th percentile), word error rate after a round trip through Whisper, real-time factor | the real `tts.sentences()` and `tts.synthesize()`; numbers are written as digits in the cases, as Whisper writes them |
+| `voice_stop` | component | Stop latency: stop request to silence | built in code: near-silent playback through the `play_audio` hook, stopped at a random moment, plus every stop that a dashboard tab reported |
+| `wake` | component | Missed wakes, false wakes, false wakes per hour of audio without the phrase; `echo_miss_rate` (no threshold): missed wakes when the phrase is said over the agent's own voice | each recording streams through the live detector. Synthetic clips use voices that never made a training clip; the echo clips mix the phrase over the agent's voice (`config.TTS_VOICE`) at 25% and 50% |
+| `proactive` | component | False alerts (spoke up when nothing was wrong), missed alerts, alerts that name the failing test | rendered screens: failed test runs in four tools, and hard negatives such as an import error, code that mentions tests, passing runs |
+| `skills` | component | A skill fires when it should and stays quiet when it should not, and tool selection offered it | prompts that are not the manifests' own examples, through `tools.select()` and one model step |
+| `mcp_select` | component | The right tool among 5, 20 and 40, with all of them in the request or only the top 5 that `tools.select()` picks | a made-up 40-tool catalog in the style of common MCP servers |
+| `task5` | end-to-end | A failure spoken at the right screen, false alerts, repeats (the cool-down), model calls per screen | screen sessions through the real `ScreenWatcher`; speech and notifications are recorded, not played |
+| `task6` | end-to-end | A spoken request becomes a reminder with the right text, due at the right time | Whisper, the brain, and the reminders MCP server over stdio, in a throwaway runtime folder |
+
+### How to read the Session 3 numbers
+
+- `wake.false_wakes_per_hour` comes from a few minutes of synthetic audio, so one false wake is already about 13 per
+  hour. The rate on 10.7 h of openWakeWord's validation audio is in [VERIFICATION.md](VERIFICATION.md). Add an hour
+  of your own normal talk (`--wakes 0`) for a number that means something.
+- `wake` synthetic positives include one clip spoken by the OS voice. It says the name its own way, so a miss there
+  shows the gap between speech engines, not a miss on your voice.
+- `mcp_select.acc_40` is expected to drop: the point is the comparison with `sel_acc_40`, where the agent offers only
+  the 5 tools that match the request.
+- `tts.first_audio_*` stops at Kokoro. The tab adds about 0.1 to 0.5 s; the Voice tab of the dashboard shows the time
+  until the tab actually played.
+
+### What to record for Session 3
+
+- **Wake word, the most important:** 20 to 40 new clips of "Hey Sanjaya" (not the clips you trained with) in the
+  rooms and at the distances where you use it, each with `--wakes 1`. Then one long recording of normal talk, a
+  meeting or a video call without the phrase, with `--wakes 0`: that is the false-wake rate that matters.
+- **Task 6:** 3 to 5 spoken reminder requests in your own voice, with what the reminder must hold and when.
+- **Proactive and Task 5:** screenshots of your own terminal or editor: a failing test run (`--alert`) and things
+  that are not one (an error that is not a test, a passing run).
+
 ## Add a case from your own use
 
 Each command writes one case to `data/evals/user/` with an id `u001`, `u002`, ... and prints it.
@@ -188,6 +222,16 @@ python cli.py evals add task3 morning.wav --start 09:00 --question "Which venue 
 python cli.py evals add task3 --to u001 --question "What did we decide about catering?" --unanswerable
 python cli.py evals add task4 --split test --memory "(09:00, fact) Demo is on Friday at 16:00" --memory "(11:00, action_item) Send slides (due tomorrow)"
 python cli.py evals add task4 --prefer "Mention the weather first" --complaint "Start with the weather."
+
+# Session 3
+python cli.py evals add tts "Your train leaves at 6:40 from platform 2."
+python cli.py evals add wake kitchen.wav --wakes 1 --note "kitchen, 3 m away"
+python cli.py evals add wake meeting.wav --wakes 0 --note "45 min of a meeting"
+python cli.py evals add proactive shot.png --alert --mention test_parse
+python cli.py evals add skills "how many cups is a liter" --skill unit_convert
+python cli.py evals add mcp_select "what is on my calendar on friday" --tool calendar__list_events
+python cli.py evals add task5 a.png b.png c.png --fail-at 2 --mention test_login
+python cli.py evals add task6 request.wav --text "Remind me to call mum in five minutes" --mention mum --minutes 5
 ```
 
 For `task4`, your folder needs both days and preferences. Your preferences have no code check, so Gemma judges them.

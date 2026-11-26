@@ -1,0 +1,13 @@
+{
+  "name": "standup",
+  "description": "Write a short stand-up update from the user's memories of the last day: what was done, what is next, blockers.",
+  "version": "1.0",
+  "tier": "safe",
+  "effects": ["reads_memory"],
+  "input_schema": {
+    "type": "object",
+    "properties": {"hours": {"type": "number", "description": "how far back to look, default 24"}}
+  },
+  "examples": ["write my stand-up update", "what should I say at standup today", "summarize what I did since yesterday for the daily standup"],
+  "entry": "skill.py:run"
+}

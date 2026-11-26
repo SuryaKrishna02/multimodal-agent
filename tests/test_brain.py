@@ -1,17 +1,44 @@
 """Tests for the tool loop in agent.brain, with the model server mocked out.
 
-The whole module is skipped when the third-party packages of the agent are not installed, because the
+The event log, the approval queue's events and last_request.json go to a temporary folder for the whole module
+(`setUpModule`), so a test run never writes into your data/runtime/. The whole module is skipped when the third-party packages of the agent are not installed, because the
 contract tests must run on a bare Python.
 """
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 try:
-    from agent import brain, tools
+    from agent import brain, config, events, tools
 except ImportError as e:  # bare interpreter without requirements/base.txt
     raise unittest.SkipTest(f"agent dependencies are not installed: {e}") from e
+
+REAL_RUNTIME = config.RUNTIME
+_runtime = tempfile.TemporaryDirectory()
+_patch = mock.patch.object(config, "RUNTIME", Path(_runtime.name))
+
+
+def setUpModule() -> None:
+    """Send every event of this module to a temporary folder."""
+    _patch.start()
+
+
+def tearDownModule() -> None:
+    """Restore the runtime folder and delete the temporary one."""
+    _patch.stop()
+    _runtime.cleanup()
+
+
+class Isolation(unittest.TestCase):
+    """The tests of this module never write into the real runtime folder."""
+
+    def test_events_go_to_a_temporary_folder(self):
+        """The event log that the tool loop writes to is the temporary one (before 2026-11-24 it was the real one)."""
+        self.assertNotEqual(events._path().parent, REAL_RUNTIME)
+        self.assertEqual(events._path().parent, Path(_runtime.name))
 
 
 def reply(content: str = "", calls: list[dict] | None = None) -> dict:
@@ -62,6 +89,14 @@ class RespondLoop(unittest.TestCase):
         ):
             out = brain.respond([brain.part("text", "what time is it")], use_memory=False, **kwargs)
         return out, send
+
+    def test_spoken_reply_asks_for_plain_speech(self):
+        """A voice turn adds the plain-speech instruction to the system prompt; a typed turn does not."""
+        for spoken in (True, False):
+            with self.subTest(spoken=spoken):
+                _, send = self.run_respond([reply("Hello")], spoken=spoken)
+                system = send.call_args.args[0][0]["content"]
+                self.assertEqual(brain.SPOKEN.strip() in system, spoken)
 
     def test_plain_answer_has_no_tool_calls(self):
         """A reply without tool calls is returned as text."""

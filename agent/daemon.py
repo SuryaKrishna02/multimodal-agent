@@ -409,6 +409,10 @@ class Daemon:
     def _boot(self) -> None:
         if not self.models:
             return
+        from agent import mcp_client, proactive
+
+        threading.Thread(target=mcp_client.start, daemon=True).start()  # the enabled MCP tools, for the model
+        threading.Thread(target=proactive.watch_reminders, args=(self.stop_flag,), daemon=True).start()
         llm, emb = serving.llm_server(), serving.embed_server()
         llm.start()
         emb.start()

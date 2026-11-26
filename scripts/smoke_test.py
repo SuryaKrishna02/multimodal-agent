@@ -1,4 +1,7 @@
-"""Smoke test: can the pinned llama-server + Gemma 4 handle text, image and audio?
+"""Smoke test: do the pinned llama-server, Gemma 4 and the Session 3 parts work end to end?
+
+Checks text, image, audio, tools and video through llama-server, then Kokoro speech that Gemma transcribes, and the
+reminders MCP server over stdio.
 
     python scripts/smoke_test.py            # default tier (E4B), run with the .venv python
     python scripts/smoke_test.py --tier e2b
@@ -124,6 +127,63 @@ def check(name: str, content, must_contain: list[str], **params) -> bool:
     return ok
 
 
+def check_voice(tmp: Path) -> bool:
+    """Session 3: Kokoro speaks a sentence, and Gemma transcribes it (the audio path in the other direction).
+
+    Args:
+        tmp (Path): A temporary folder.
+
+    Returns:
+        bool: True if Gemma heard the key words.
+    """
+    import soundfile as sf
+    from scipy.signal import resample_poly
+
+    from agent.voice import tts
+
+    try:
+        speech = tts.synthesize("Remind me to call Ravi at four.")
+    except FileNotFoundError as e:
+        print(f"FAIL  voice  {e}")
+        return False
+    wav = tmp / "kokoro.wav"
+    sf.write(wav, resample_poly(speech, config.SAMPLE_RATE, config.TTS_SAMPLE_RATE), config.SAMPLE_RATE)
+    parts = [
+        {"type": "text", "text": "Transcribe this audio."},
+        {"type": "input_audio", "input_audio": {"data": b64(wav), "format": "wav"}},
+    ]
+    return check("voice", parts, ["ravi"])
+
+
+def check_mcp(tmp: Path) -> bool:
+    """Session 3: start the reminders MCP server over stdio, add a reminder and read it back.
+
+    Args:
+        tmp (Path): A temporary folder for the server's database and the MCP state.
+
+    Returns:
+        bool: True if the reminder came back.
+    """
+    from unittest import mock
+
+    from agent import mcp_client
+
+    t0 = time.time()
+    with mock.patch.object(config, "RUNTIME", tmp), mock.patch.object(config, "MCP_CONFIG", tmp / "mcp.json"):
+        try:
+            found = mcp_client.hub.connect(config.REMINDERS_SERVER)
+            mcp_client.hub.call(config.REMINDERS_SERVER, "add_reminder", {"text": "smoke test", "in_minutes": 5})
+            listed = str(mcp_client.hub.call(config.REMINDERS_SERVER, "list_reminders", {}))
+        except Exception as e:  # noqa: BLE001 - a smoke test reports every failure the same way
+            print(f"FAIL  mcp    {e}")
+            return False
+        finally:
+            mcp_client.hub.disconnect(config.REMINDERS_SERVER)
+    ok = "smoke test" in listed
+    print(f"{'PASS' if ok else 'FAIL'}  mcp    {time.time() - t0:4.1f}s  {len(found)} tools, reminder read back: {ok}")
+    return ok
+
+
 def main() -> int:
     """Run all smoke checks.
 
@@ -192,6 +252,7 @@ def main() -> int:
             )
         else:
             print(f"SKIP  video  ffmpeg/ffprobe not found ({platforms.current().install_hint('ffmpeg')})")
+        results += [check_voice(Path(d)), check_mcp(Path(d))]
     print(f"llama-server resident memory: {server.rss_gb():.1f} GB")
     if started_here:
         server.stop()
