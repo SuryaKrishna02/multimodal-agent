@@ -182,6 +182,65 @@ class SingleDaemon(TempRuntime):
         self.assertEqual((checkpoint.get("daemon") or {}).get("pid"), os.getpid())
 
 
+class DashboardStop(TempRuntime):
+    """Ctrl-C on `cli.py dashboard` stops what it started, and leaves a daemon that ran before it."""
+
+    def stop_started(self, pid: int | None, up: set[str] | None = None) -> tuple[mock.MagicMock, mock.MagicMock]:
+        """Run `cli.stop_started` with fake model servers, and return the fakes.
+
+        Args:
+            pid (int | None): The daemon that the dashboard started, or None.
+            up (set[str] | None, optional): The servers that ran before the dashboard. Defaults to none.
+
+        Returns:
+            tuple[mock.MagicMock, mock.MagicMock]: The fake language model server and the fake embedding server.
+        """
+        import contextlib
+        import io
+
+        import cli
+
+        llm, emb = mock.MagicMock(), mock.MagicMock()
+        llm.name, emb.name = "llm", "embed"
+        with (
+            mock.patch.object(cli.serving, "llm_server", return_value=llm),
+            mock.patch.object(cli.serving, "embed_server", return_value=emb),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            cli.stop_started(pid, up or set())
+        return llm, emb
+
+    def test_the_servers_stop_when_no_daemon_runs(self) -> None:
+        """No daemon heartbeat: the dashboard was the only user, so both model servers stop."""
+        for server in self.stop_started(None):
+            server.stop.assert_called_once()
+
+    def test_a_daemon_that_ran_before_keeps_its_servers(self) -> None:
+        """A live heartbeat of a daemon the dashboard did not start: the model servers stay up."""
+        checkpoint.put("daemon", {"pid": os.getppid(), "ts": time.time()})
+        for server in self.stop_started(None):
+            server.stop.assert_not_called()
+
+    def test_a_server_that_ran_before_stays_up(self) -> None:
+        """Another dashboard or `serve` started the language model server: only the embedding server stops."""
+        llm, emb = self.stop_started(None, {"llm"})
+        llm.stop.assert_not_called()
+        emb.stop.assert_called_once()
+
+    def test_the_started_daemon_stops_before_the_servers(self) -> None:
+        """The process that the dashboard started ends, then the model servers stop."""
+        import subprocess
+        import sys
+
+        import cli
+
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(proc.kill)
+        for server in self.stop_started(proc.pid):
+            server.stop.assert_called_once()
+        self.assertFalse(cli.running(proc.pid))
+
+
 class FakeVAD:
     """Speech wherever the samples are not zero, in 0.1 s steps, without the ONNX model."""
 

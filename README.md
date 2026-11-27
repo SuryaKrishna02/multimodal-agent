@@ -22,8 +22,7 @@ nothing to record) plus any you add from your own use. `python evals/run_all.py`
 python3 scripts/setup.py                      # detects your OS + GPU; pinned binaries + models, checksum-verified (~13 GB)
 .venv/bin/python cli.py doctor                # what was detected, what is missing
 .venv/bin/python cli.py smoke                 # text, image, audio, tools: ALL PASS?
-.venv/bin/python cli.py dashboard             # http://127.0.0.1:8765
-.venv/bin/python cli.py daemon start          # Session 2: the always-on process (see docs/SETUP.md)
+.venv/bin/python cli.py dashboard             # http://127.0.0.1:8765, plus the Session 2 daemon; Ctrl-C stops both
 .venv/bin/python cli.py say "Hello"           # Session 3: the voice (turn on Voice in the dashboard to hear it there)
 ```
 

@@ -23,7 +23,8 @@ from agent.senses import audio, video
 from dashboard import always_on, chat, mcp, proactive, voice
 from evals import common as evals_common
 
-state = {"tier": config.TIER, "mic": None}
+# daemon_starts_models: `cli.py dashboard` started a daemon, and that daemon starts the model servers.
+state = {"tier": config.TIER, "mic": None, "daemon_starts_models": False}
 llm, emb = serving.llm_server(), serving.embed_server()
 
 
@@ -37,8 +38,9 @@ async def lifespan(_app):
 
     def boot():
         try:
-            llm.start()
-            emb.start()
+            if not state["daemon_starts_models"]:  # else two processes would start the same server at once
+                llm.start()
+                emb.start()
         except Exception as e:  # noqa: BLE001 - show the failure in the event log
             events.emit("serving.error", message=str(e))
         # After the first start, so the watchers cannot race it. One each, because a restart waits for the model to load.

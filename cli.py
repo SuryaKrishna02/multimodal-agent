@@ -1,7 +1,7 @@
 """Command line for the agent. Run `python cli.py -h` for the list.
 
     python cli.py serve                       start both model servers and wait
-    python cli.py dashboard                   start the dashboard on http://127.0.0.1:8765
+    python cli.py dashboard [--no-daemon]     the dashboard on http://127.0.0.1:8765, with the daemon (Ctrl-C stops both)
     python cli.py note                        Task 1: record a voice note (Enter to stop)
     python cli.py note --file note.wav        Task 1 from a file
     python cli.py look                        Task 2: screenshot now -> explanation + fix
@@ -39,8 +39,10 @@ those plug-ins and never branch on the OS. Force a choice with AGENT_PLATFORM=<n
 import argparse
 import contextlib
 import json
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from agent import config, serving
@@ -88,12 +90,101 @@ def cmd_stop(_a):
     serving.embed_server().stop()
 
 
-def cmd_dashboard(_a):
-    """`dashboard`: run the web dashboard on localhost."""
+def cmd_dashboard(a):
+    """`dashboard`: run the web dashboard on localhost, and the daemon with it unless `--no-daemon`.
+
+    If no daemon runs, the command starts one. Ctrl-C then stops what this command started: the dashboard, the
+    daemon and the model servers. A daemon that already ran (the login item, or `daemon start`) keeps running, and
+    so do the model servers that it uses. A model server that already ran (another dashboard, `serve`) stays up.
+
+    Args:
+        a (argparse.Namespace): Parsed arguments with `no_daemon`.
+    """
     import uvicorn
 
-    print(f"Dashboard: http://127.0.0.1:{config.DASHBOARD_PORT}")
-    uvicorn.run("dashboard.server:app", host="127.0.0.1", port=config.DASHBOARD_PORT, log_level="warning")
+    from agent import daemon
+    from dashboard import server
+
+    st, own = daemon.status(), None
+    up = {s.name for s in (serving.llm_server(), serving.embed_server()) if s.running_model()}
+    if st["alive"]:
+        print(f"The daemon already runs (pid {st['pid']}). It keeps running after the dashboard stops.")
+    elif not a.no_daemon:
+        own = start_daemon()
+        print(f"Daemon started (pid {own}); log: {config.DAEMON_LOG}" if own else f"No daemon; see {config.DAEMON_LOG}")
+    server.state["daemon_starts_models"] = own is not None
+    print(f"Dashboard: http://127.0.0.1:{config.DASHBOARD_PORT}. Ctrl-C stops it and what it started.")
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # uvicorn sends SIGTERM again after its shutdown
+    try:
+        with contextlib.suppress(KeyboardInterrupt):  # uvicorn raises the Ctrl-C again after its shutdown
+            uvicorn.run(server.app, host="127.0.0.1", port=config.DASHBOARD_PORT, log_level="warning")
+    finally:
+        stop_started(own, up)
+
+
+def start_daemon() -> int | None:
+    """Start the daemon in the background and wait for its first heartbeat.
+
+    Returns:
+        int | None: The process id of the daemon, or None if it exited or did not beat in time (its log says why).
+    """
+    from agent import daemon, platforms
+
+    cmd = [sys.executable, str(config.ROOT / "cli.py"), "daemon", "run"]
+    pid = platforms.current().spawn_background(cmd, config.ROOT, config.DAEMON_LOG)
+    deadline = time.monotonic() + config.DAEMON_START_WAIT_S
+    while time.monotonic() < deadline and running(pid):
+        if daemon.status().get("pid") == pid:
+            return pid
+        time.sleep(0.2)
+    return None
+
+
+def running(pid: int) -> bool:
+    """Return whether a process runs. A child that exited and was not reaped yet does not run.
+
+    Args:
+        pid (int): The process id.
+
+    Returns:
+        bool: True if the process runs.
+    """
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+
+
+def stop_started(pid: int | None, up: set[str]) -> None:
+    """Stop what `dashboard` started: its daemon, then the model servers that no daemon or other process uses.
+
+    Args:
+        pid (int | None): The daemon that `dashboard` started, or None.
+        up (set[str]): Names of the model servers that ran before `dashboard` started. They stay up.
+    """
+    import psutil
+
+    from agent import daemon
+
+    if pid and running(pid):
+        print(f"Stopping the daemon (pid {pid}). It finishes its current job first; Ctrl-C again kills it.")
+        proc = psutil.Process(pid)
+        proc.terminate()
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            proc.kill()
+            proc.wait()
+    if (st := daemon.status())["alive"]:
+        return print(f"The daemon (pid {st['pid']}) still runs, so the model servers stay up.")
+    for s in (serving.llm_server(), serving.embed_server()):
+        if s.name in up:
+            print(f"The {s.name} server ran before the dashboard, so it stays up.")
+        else:
+            s.stop()
+            print(f"The {s.name} server stopped.")
 
 
 def record_until_enter():
@@ -238,10 +329,7 @@ def cmd_daemon(a):
         if (other := daemon.Daemon(models=not a.no_models).run()) is not None:
             print(f"another daemon already runs (pid {other}), so this one exits")
     elif a.action == "start":
-        if st["alive"]:
-            return print(f"already running (pid {st['pid']})")
-        pid = plat.spawn_background(cmd, config.ROOT, config.DAEMON_LOG)
-        print(f"started (pid {pid}); log: {config.DAEMON_LOG}")
+        daemon_start(st)
     elif a.action in ("stop", "kill"):
         stop_daemon(st, kill=a.action == "kill")
     elif a.action == "install":
@@ -253,6 +341,18 @@ def cmd_daemon(a):
         print("removed" if plat.uninstall_autostart(config.AUTOSTART_LABEL) else "no login item was installed")
     else:
         show(st)
+
+
+def daemon_start(st: dict) -> None:
+    """`daemon start`: start the daemon in the background, unless one runs.
+
+    Args:
+        st (dict): The result of `daemon.status()`.
+    """
+    if st["alive"]:
+        return print(f"already running (pid {st['pid']})")
+    pid = start_daemon()
+    print(f"started (pid {pid}); log: {config.DAEMON_LOG}" if pid else f"did not start; see {config.DAEMON_LOG}")
 
 
 def stop_daemon(st: dict, kill: bool) -> None:
@@ -571,7 +671,9 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve").set_defaults(fn=cmd_serve)
     sub.add_parser("stop").set_defaults(fn=cmd_stop)
-    sub.add_parser("dashboard").set_defaults(fn=cmd_dashboard)
+    p = sub.add_parser("dashboard")
+    p.add_argument("--no-daemon", action="store_true", help="do not start the daemon with the dashboard")
+    p.set_defaults(fn=cmd_dashboard)
     p = sub.add_parser("note")
     p.add_argument("--file")
     p.set_defaults(fn=cmd_note)

@@ -99,6 +99,7 @@ CHECKPOINT_DB = RUNTIME / "checkpoints.sqlite"
 DAEMON_TICK_S = 1.0  # main loop period: look at the schedule and the job queue
 DAEMON_HEARTBEAT_S = 5.0  # the daemon writes "alive" this often; 3 missed beats = not running
 DAEMON_LOG = RUNTIME / "daemon.log"
+DAEMON_START_WAIT_S = 30.0  # `daemon start` and `dashboard` wait this long for the first heartbeat of a new daemon
 EVENTS_KEEP = 50_000  # events kept in the event log; older ones are deleted once a day
 EVENTS_PAGE = 2000  # most events one poll returns (the dashboard's first poll)
 # name -> (job kind, when). "every <s>" runs on an interval, "at HH:MM" once a day.

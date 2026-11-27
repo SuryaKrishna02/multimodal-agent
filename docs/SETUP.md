@@ -69,7 +69,17 @@ Grant these to the app that runs the agent (Terminal, iTerm, Visual Studio Code,
 .venv/bin/python cli.py dashboard     # open http://127.0.0.1:8765 in Chrome
 ```
 
-The dashboard starts both model servers (this takes about 10 to 20 s the first time). Tabs 1 to 9, then 0,
+One command starts everything: the dashboard, the daemon (see [Always on](#always-on-session-2)) and both model
+servers (this takes about 10 to 20 s the first time). Ctrl-C stops what the command started: first the daemon (it
+finishes its current job; a second Ctrl-C kills it), then the model servers.
+
+- If a daemon already runs (the login item, or `daemon start`), the dashboard uses it and leaves it running, with
+  its model servers, after Ctrl-C.
+- A model server that already ran (another dashboard, or `python cli.py serve`) stays up after Ctrl-C.
+- `python cli.py dashboard --no-daemon` starts only the dashboard and the model servers, as in Session 1. Ctrl-C
+  stops the model servers too, unless a daemon uses them.
+
+Tabs 1 to 9, then 0,
 follow the session agenda. Session 1 has Serving, Senses, Brain, Memory and Tools. Session 2 adds Always on and Evolve.
 Tasks come next, Session 3 adds Voice (9), and Scorecard (0) comes last.
 
@@ -132,6 +142,7 @@ Switch to the small model for any command: `AGENT_TIER=e2b .venv/bin/python cli.
 
 The daemon is a separate process. It runs jobs from a queue, on a schedule (`config.SCHEDULE`) and on
 triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The dashboard shows it in the Always on tab.
+`python cli.py dashboard` starts it for you. To run it without the dashboard:
 
 ```bash
 .venv/bin/python cli.py daemon start             # in the background; the log is data/runtime/daemon.log
