@@ -917,6 +917,23 @@ were deleted.
   the tab's `voice.ended` and this machine's end of playback, the follow-up trigger, and a silent follow-up that ends
   quietly. Not yet tried with the live microphone.
 
+### The agent's voice is now `am_michael` (2026-11-27)
+
+The user chose a male voice: `config.TTS_VOICE` changed from `af_heart` (US female) to `am_michael` (US male), one of
+the 54 voices in `voices-v1.0.bin`. `python cli.py say --local` played it. The wake eval mixes the agent's own voice in
+as echo, so its synthetic cases were rebuilt with the new voice.
+
+| Metric | `af_heart` | `am_michael` | Threshold |
+| ------ | ---------- | ------------ | --------- |
+| `tts` first audio p95 | 0.59 s | 0.54 s | <= 0.8 PASS |
+| `tts` WER | 0.038 | 0.038 | <= 0.10 PASS |
+| `tts` real-time factor | 0.151 | 0.122 | |
+| `wake` miss_rate | 0.000 | 0.000 | <= 0.10 PASS |
+| `wake` echo_miss_rate | 0.000 | 0.167 (2 of 12, both at 50% echo: `am_echo` and `hf_beta`) | none |
+| `wake` false_wakes_per_hour | 23.4 | 23.0 (the same 2 "Jarvis was the butler..." clips) | <= 0.5 FAIL (as before) |
+
+The agent's voice alone still never wakes it, and Whisper hears the new voice as well as the old one (WER unchanged).
+
 ## Not verified yet
 
 - Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool
