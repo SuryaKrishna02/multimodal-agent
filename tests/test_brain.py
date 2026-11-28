@@ -196,6 +196,115 @@ class PendingReply(unittest.TestCase):
         self.assertIn("a.txt", system)
 
 
+class SelectTools(unittest.TestCase):
+    """brain.select_tools keeps the tool of an ongoing request on offer during short follow-ups."""
+
+    REMIND = "remind me to send the Discord message in two hours"
+
+    def select(self, query: str, history: list[dict], rankings: dict[str, list[str]]) -> tuple[list[str], list]:
+        """Run `select_tools` with `tools.select` answering from a fixed table.
+
+        Args:
+            query (str): The current user text.
+            history (list[dict]): Earlier messages.
+            rankings (dict[str, list[str]]): The ranking that `tools.select` returns for each exact query.
+
+        Returns:
+            tuple[list[str], list]: The chosen tools and the queries that `tools.select` got.
+        """
+        with mock.patch.object(tools, "select", side_effect=lambda q, k: rankings[q][:k]) as select:
+            names = brain.select_tools(query, history)
+        return names, [c.args[0] for c in select.call_args_list]
+
+    def test_follow_up_keeps_the_tool_of_the_request(self):
+        """On 2026-11-28 "Sure." alone ranked no add_reminder, and the model claimed a reminder it never set."""
+        history = [
+            {"role": "user", "content": self.REMIND},
+            {"role": "assistant", "content": "What time?"},
+            {"role": "user", "content": "for 7:15 am"},
+            {"role": "assistant", "content": "I will set it."},
+        ]
+        rankings = {
+            "Sure.": ["search_memory", "save_note", "delete_file", "get_time", "read_file"],
+            f"{self.REMIND} for 7:15 am Sure.": ["add_reminder", "save_note", "get_time", "list_reminders", "x"],
+        }
+        names, queries = self.select("Sure.", history, rankings)
+        self.assertIn("add_reminder", names)
+        self.assertEqual(names[0], "search_memory")  # the current message still ranks first
+        self.assertEqual(len(names), brain.config.MAX_TOOLS_PER_REQUEST)
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(queries, ["Sure.", f"{self.REMIND} for 7:15 am Sure."])
+
+    def test_first_message_uses_only_its_own_text(self):
+        """With no history there is one ranking, unchanged."""
+        names, queries = self.select("what time is it", [], {"what time is it": ["get_time", "a", "b", "c", "d"]})
+        self.assertEqual(names, ["get_time", "a", "b", "c", "d"])
+        self.assertEqual(queries, ["what time is it"])
+
+    def test_only_recent_user_text_counts(self):
+        """Assistant messages, notes with list content and user messages older than TOOL_CONTEXT_TURNS are left out."""
+        history = [{"role": "user", "content": f"u{i}"} for i in range(5)]
+        history += [{"role": "assistant", "content": "a"}, {"role": "user", "content": [{"type": "text"}]}]
+        context = " ".join(f"u{i}" for i in range(5 - brain.config.TOOL_CONTEXT_TURNS, 5)) + " now"
+        _, queries = self.select("now", history, {"now": ["a"], context: ["b"]})
+        self.assertEqual(queries[1], context)
+
+
+class UnbackedClaim(unittest.TestCase):
+    """A reply that claims an action in a turn with no tool call gets one retry, then a fixed honest reply."""
+
+    def run_replies(self, *replies: dict) -> tuple[dict, mock.MagicMock]:
+        """Run `respond` on a scripted model with add_reminder on offer.
+
+        Args:
+            *replies (dict): The completions that the mocked `send` returns in order.
+
+        Returns:
+            tuple[dict, mock.MagicMock]: The result and the mocked `send`.
+        """
+        with (
+            mock.patch.object(brain, "send", side_effect=list(replies)) as send,
+            mock.patch.object(tools, "select", return_value=["get_time"]),
+        ):
+            return brain.respond([brain.part("text", "Sure.")], use_memory=False), send
+
+    def test_claim_without_a_call_is_retried_with_a_note(self):
+        """The second request ends with the note, after the claim, and its reply ends the turn."""
+        out, send = self.run_replies(reply("I have set a reminder for 7:15."), reply("What should it say?"))
+        self.assertEqual(out["text"], "What should it say?")
+        second = send.call_args_list[1].args[0]
+        self.assertEqual(second[-2], {"role": "assistant", "content": "I have set a reminder for 7:15."})
+        self.assertEqual(second[-1], {"role": "user", "content": brain.NO_CALL_NOTE})
+
+    def test_retry_can_make_the_call(self):
+        """After the note the model calls the tool, and its answer ends the turn."""
+        out, _ = self.run_replies(
+            reply("I'll set it now."), reply(calls=[call("get_time", "{}")]), reply("Done, it is noon.")
+        )
+        self.assertEqual([t["tool"] for t in out["tool_calls"]], ["get_time"])
+        self.assertEqual(out["text"], "Done, it is noon.")
+
+    def test_second_claim_becomes_the_fixed_reply(self):
+        """The user never hears a claim that no tool call backs."""
+        out, send = self.run_replies(reply("I have set a reminder."), reply("I've already set it."))
+        self.assertEqual(out["text"], brain.NO_CALL_REPLY)
+        self.assertEqual(send.call_count, 2)
+
+    def test_reply_without_a_claim_is_not_retried(self):
+        """A question or a plain answer ends the turn on the first request."""
+        for text in ("What time is the session?", "Yes, I set it earlier.", "I remember you like tea."):
+            with self.subTest(text=text):
+                out, send = self.run_replies(reply(text))
+                self.assertEqual(out["text"], text)
+                self.assertEqual(send.call_count, 1)
+
+    def test_claim_after_a_tool_call_is_not_retried(self):
+        """A turn with a call is backed, so its summary passes as written."""
+        out, send = self.run_replies(reply(calls=[call("get_time", "{}")]), reply("I have noted the time."))
+        self.assertEqual(out["text"], "I have noted the time.")
+        self.assertEqual(send.call_count, 2)
+
+
 class ApprovalNote(unittest.TestCase):
     """brain.approval_note tells the model how a call that waited for approval ended."""
 

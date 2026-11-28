@@ -116,8 +116,10 @@ too short or nearly a duplicate.
 
 ### 5 Tools: `agent/tools/`
 
-`tools.select()` embeds the request, ranks the tools by description and examples, and offers the top 5 only. `tools.run()`
-calls `check()`: schema, tier, guard, then execute.
+`tools.select()` embeds the request, ranks the tools by description and examples, and offers the top 5 only.
+`brain.select_tools()` ranks twice, on the message alone and on the last 3 user messages plus it, and interleaves the
+two lists, so a follow-up such as "Sure." keeps the tool of the request it answers. `tools.run()` calls `check()`:
+schema, tier, guard, then execute.
 
 | Tier | Tools |
 | ---- | ----- |
@@ -185,9 +187,11 @@ eval and the soak test use it to run a throwaway daemon.
 
 1. A sense produces raw input: a 16 kHz float array, a PIL image or a video file.
 2. `brain.part()` turns it into an OpenAI-style content part (base64 WAV, PNG or MP4).
-3. For a chat turn, `brain.respond()` calls `tools.select()`. It embeds the request with the embedding server and ranks
-   every tool by its description plus example requests. Only the top 5 tool schemas go into the request. If the embedding
-   server is down, the first 5 registered tools are used.
+3. For a chat turn, `brain.respond()` calls `brain.select_tools()`, which calls `tools.select()`. It embeds the request
+   with the embedding server and ranks every tool by its description plus example requests. With history, it ranks again
+   on the last `TOOL_CONTEXT_TURNS` user messages plus the request, and interleaves the two rankings, the request first.
+   Only the top 5 tool schemas go into the request. If the embedding server is down, the first 5 registered tools are
+   used.
 4. `brain.fit_budget()` adds the system prompt, the top 3 memories and the tool schemas. It estimates tokens: audio at 25
    per second, an image at pixels / 2304 (up to 1,120), a video at frames x image, text at chars / 4. If the request does
    not fit, it drops the oldest history first, then the memories.
@@ -196,6 +200,8 @@ eval and the soak test use it to run a throwaway daemon.
 6. A reply with `tool_calls` goes through `tools.run()`: schema check, tier, guard, execute. The result returns to the
    model as a `tool` message and the loop runs again, with thinking turned on from the second step (a Gemma 4 quirk: with
    thinking off, the reply after a tool result comes back empty).
+   - A reply with no tool call in the turn that still says "I have set…" or "I will save…" (`brain.CLAIM`) gets one retry
+     with a note that nothing happened. A second such reply becomes a fixed "I did not do that" reply.
    - A `confirm` call returns `pending` and ends the turn with a reply that the code writes, because the model claimed the
      call was done. While it waits, the system prompt names it. The model does not reply when the user decides. The
      dashboard adds the outcome (`brain.approval_note()`) to the chat history, so the next request tells the model what
@@ -365,8 +371,9 @@ flowchart TB
 1. "Hey Jarvis" wakes the loop (`wake.Detector.heard()`, with Whisper checking a "maybe" score); any speech that
    plays stops. In a conversation, a follow-up within `VOICE_FOLLOW_UP_S` of the last reply needs no wake word.
 2. The request is recorded until a pause and transcribed by Whisper.
-3. The dashboard chat answers it: `tools.select()` offers `reminders__add_reminder` among the top 5, the model calls
-   it, `tools.check()` passes it (the user set it to `safe`), and the MCP client sends it to the reminders server.
+3. The dashboard chat answers it: `brain.select_tools()` offers `reminders__add_reminder` among the top 5, also on the
+   follow-ups of a conversation, the model calls it, `tools.check()` passes it (if the user set it to `safe`; at the
+   default `confirm` it waits for approval in the chat), and the MCP client sends it to the reminders server.
 4. The reply is spoken in the dashboard tab, sentence by sentence.
 5. The daemon asks the server for due reminders every 15 s. A due one is spoken, shown as a notification and written
    to the feed, then marked done.

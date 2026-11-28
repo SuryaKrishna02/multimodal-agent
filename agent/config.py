@@ -63,6 +63,9 @@ VIDEO_MAX_S = 60  # Gemma 4 guidance: up to 60 s of video at 1 fps
 # --- Brain -------------------------------------------------------------------
 MAX_OUTPUT_TOKENS = 1024
 MAX_TOOLS_PER_REQUEST = 5  # small tool list per request: E4B degrades with many
+# Earlier user messages that also choose the tools. A follow-up such as "Sure." or "for 7:15" matches no tool by
+# itself, so without them the tool the conversation is about (add_reminder) dropped out of the list.
+TOOL_CONTEXT_TURNS = 3
 TOOL_RETRIES = 2  # re-ask the model after an invalid tool call
 MEMORY_TOP_K = 3  # memories injected into each prompt
 

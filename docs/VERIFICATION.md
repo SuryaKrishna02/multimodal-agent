@@ -934,6 +934,38 @@ as echo, so its synthetic cases were rebuilt with the new voice.
 
 The agent's voice alone still never wakes it, and Whisper hears the new voice as well as the old one (WER unchanged).
 
+### A reminder the agent said it set, but never set (2026-11-28)
+
+In a voice conversation on Gemma 4 E4B, the agent said "I have set a reminder for 7:15 am", and nothing fired:
+`reminders.sqlite` was empty and the event log held no tool call in any of the 4 turns. Three causes:
+
+| Turn | Heard | `add_reminder` offered? | The model |
+| ---- | ----- | ----------------------- | --------- |
+| 1 | "remind me… in two hours" | yes | asked for the time instead of `in_minutes: 120` |
+| 2 | "That name is E.S.T." | no | asked again |
+| 3 | "for 7.15 am." | yes | said "I will set a reminder for 7:15", with no call |
+| 4 | "Sure." | no | said "I have set a reminder", with no call |
+
+1. `tools.select()` ranked the current message only, so a follow-up matched no reminder tool. Now
+   `brain.select_tools()` also ranks the last `config.TOOL_CONTEXT_TURNS` (3) user messages plus the message, and
+   interleaves the two rankings. On the embedding server, with the 4 real messages, `add_reminder` is offered in all 4
+   turns (before: turns 1 and 3).
+2. The system prompt now says to call the tool in the same reply when it has enough, never to say it did or will do
+   something without the call, and that "in two hours" is enough. Replayed against the live model (add_reminder at
+   `confirm`, 2 runs per turn), turn 1 called `add_reminder(in_minutes=120)` and turns 3 and 4 called
+   `add_reminder(at="07:15")`, 6 of 6.
+3. A reply that claims an action (`brain.CLAIM`: "I have/I've/I will/I'll" + set, save, add, delete, send…) in a turn
+   with no tool call gets one retry with `brain.NO_CALL_NOTE`. A second claim becomes `brain.NO_CALL_REPLY`. With the
+   old tool list forced on turn 4, the model claimed "I have set a reminder" 3 of 3 times and the guard caught each. On
+   the retry it called `save_note`, the only tool near the request, and in 2 of 3 runs it then repeated `save_note`
+   until the step limit ("Stopped after too many tool steps."). With the tool selection fix that list no longer comes up.
+   After a real, approved call, "did you set the reminder?" got "Yes, I set a reminder for 7:15…" with no new call and
+   no retry (2 of 2): the simple past "I set" is not a claim on purpose, because it is how the model reports an
+   earlier turn.
+
+Not measured: the task6 eval and a live spoken run after the change. The user's `add_reminder` is still at the
+default tier `confirm`, so a call waits for approval in the chat before the reminder exists.
+
 ## Not verified yet
 
 - Real use: the evals run on **synthetic** cases (macOS `say` voices, rendered screenshots, hand-written tool

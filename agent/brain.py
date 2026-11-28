@@ -10,6 +10,7 @@ import base64
 import copy
 import io
 import json
+import re
 import time
 from collections.abc import Sequence
 
@@ -22,7 +23,27 @@ from agent.senses import video as video_sense
 
 SYSTEM = """You are a private assistant running fully on this Mac. You can hear short voice clips,
 see screenshots and use tools. Be brief and concrete. Use a tool only when it helps.
+When a request needs a tool and you have enough to call it, call it in this reply. Never say that you did or will
+do something without the tool call: only a tool call does it. A relative time such as "in two hours" is enough.
 Current time: {now}."""
+
+# A reply that says the agent did, or will do, something. With no tool call in the turn it is false: on 2026-11-28
+# Gemma said "I have set a reminder for 7:15" and no reminder existed. See docs/VERIFICATION.md.
+CLAIM = re.compile(
+    r"\bI(?:'ve| have|'ll| will)\s+(?:already\s+|now\s+|just\s+|also\s+)?"
+    r"(?:set|save|saved|create|created|add|added|schedule|scheduled|delete|deleted|remove|removed|cancel|"
+    r"cancell?ed|send|sent|write|written|wrote|store|stored|note|noted|remember|remembered)\b",
+    re.IGNORECASE,
+)
+
+# Sent as a user message after such a reply, once per turn. It names the earlier-turn case so that "did you set
+# it?" after a real call is not answered by a second call.
+NO_CALL_NOTE = (
+    "(Note from the agent code, not the user.) Your last reply says that you did or will do something, but you made "
+    "no tool call, so nothing happened. If it needs a tool, call the tool now. If it was done in an earlier turn, "
+    "say that. If you cannot do it, say that."
+)
+NO_CALL_REPLY = "I did not do that. No tool ran, so nothing changed. Please ask me again."
 
 
 # Added to the system prompt when the reply will be spoken (a voice turn). Text to speech reads every symbol, and a
@@ -279,6 +300,53 @@ def _fixed_reply(trace: list[dict], retries_left: int) -> str | None:
     return f"Waiting for your approval to run {', '.join(waiting)}. Not done yet." if waiting else None
 
 
+def select_tools(query: str, history: list[dict]) -> list[str]:
+    """Choose the tools to offer: the best for this message, interleaved with the best for the recent conversation.
+
+    The current message ranks first, so a new topic still gets its tools. The recent user messages keep the tool of
+    an ongoing request on offer when a follow-up ("Sure.") matches nothing by itself.
+
+    Args:
+        query (str): The text of the current user message.
+        history (list[dict]): Earlier messages with `role` and `content`.
+
+    Returns:
+        list[str]: At most `config.MAX_TOOLS_PER_REQUEST` tool names.
+    """
+    k = config.MAX_TOOLS_PER_REQUEST
+    now = tools.select(query or "help", k)
+    earlier = [m["content"] for m in history if m["role"] == "user" and isinstance(m["content"], str)]
+    earlier = earlier[-config.TOOL_CONTEXT_TURNS :] if config.TOOL_CONTEXT_TURNS else []
+    if not earlier:
+        return now
+    context = tools.select(" ".join([*earlier, query]), k)
+    return list(dict.fromkeys(n for pair in zip(now, context, strict=False) for n in pair))[:k]
+
+
+def _final_text(text: str, trace: list[dict], msgs: list[dict]) -> str | None:
+    """Return the reply that ends a turn whose last model message has no tool call, or None to ask the model again.
+
+    A reply that claims an action in a turn with no tool call gets one retry with `NO_CALL_NOTE`. A second such
+    reply becomes `NO_CALL_REPLY`, so the user never hears a claim that nothing backs.
+
+    Args:
+        text (str): The model's reply.
+        trace (list[dict]): The tool calls of this turn.
+        msgs (list[dict]): The request messages; the note is appended here for the retry.
+
+    Returns:
+        str | None: The text that ends the turn, or None after the note was added.
+    """
+    if trace or not CLAIM.search(text):
+        return text
+    retried = msgs[-1]["content"] == NO_CALL_NOTE
+    events.emit("brain.unbacked_claim", text=text, retried=retried)
+    if retried:
+        return NO_CALL_REPLY
+    msgs += [{"role": "assistant", "content": text}, {"role": "user", "content": NO_CALL_NOTE}]
+    return None
+
+
 def approval_note(outcome: dict) -> dict:
     """Build the history message that tells the model how a call that waited for approval ended.
 
@@ -323,7 +391,7 @@ def respond(
             memories, with `id`, `when`, `kind`, `level`, `text` and `score`).
     """
     query = " ".join(p["text"] for p in user if p["type"] == "text")
-    names = tools.select(query or "help", config.MAX_TOOLS_PER_REQUEST)
+    names = select_tools(query, history or [])
     system = system_prompt() + (SPOKEN if spoken else "") + _waiting_calls()
     hits = _recall(query, use_memory)
     lines = [f"({m['when']}, {m['kind']}) {m['text']}" for m in hits]
@@ -335,11 +403,12 @@ def respond(
         # (same as ollama/ollama#19044). Thinking on for that one step fixes it.
         params = {"chat_template_kwargs": {"enable_thinking": True}} if step > 0 else {}
         msg = send(msgs, tools=tools.schemas(names), **params)["choices"][0]["message"]
-        calls = msg.get("tool_calls") or []
-        if not calls:
-            return {"text": msg.get("content") or "", **out}
-        msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
-        retries_left = _handle_calls(calls, msgs, trace, retries_left)
-        if (text := _fixed_reply(trace, retries_left)) is not None:
+        if calls := msg.get("tool_calls") or []:
+            msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+            retries_left = _handle_calls(calls, msgs, trace, retries_left)
+            text = _fixed_reply(trace, retries_left)
+        else:
+            text = _final_text(msg.get("content") or "", trace, msgs)
+        if text is not None:
             return {"text": text, **out}
     return {"text": "Stopped after too many tool steps.", **out}
