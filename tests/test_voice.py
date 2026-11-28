@@ -79,22 +79,6 @@ class Speakable(unittest.TestCase):
         self.assertEqual(tts.speakable("Open file_name.py #3"), "Open file name.py number 3.")
 
 
-class EchoText(unittest.TestCase):
-    """The echo clips of wake-word training (the agent's voice as background) never say the phrase."""
-
-    def test_no_name_and_no_near_miss(self):
-        """Sentences from the docs that hold the name or a near miss are left out; plenty remain."""
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("train_wake_word", config.ROOT / "scripts/train_wake_word.py")
-        trainer = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-        spec.loader.exec_module(trainer)  # type: ignore[union-attr]
-        texts = trainer.echo_texts()
-        self.assertGreater(len(texts), 200)
-        for bad in ("sanj", "sonia", "hey"):
-            self.assertFalse([t for t in texts if bad in t.lower()], bad)
-
-
 class Pronunciation(unittest.TestCase):
     """A word in `config.PRONUNCIATIONS` goes to Kokoro as IPA; the rest goes through espeak."""
 
@@ -103,9 +87,9 @@ class Pronunciation(unittest.TestCase):
         tokenizer = mock.Mock(phonemize=lambda text, lang: f"<{text.strip()}>")
         with (
             mock.patch.object(tts, "engine", return_value=mock.Mock(tokenizer=tokenizer)),
-            mock.patch.dict(config.PRONUNCIATIONS, {"sanjaya": "IPA"}, clear=True),
+            mock.patch.dict(config.PRONUNCIATIONS, {"jarvis": "IPA"}, clear=True),
         ):
-            self.assertEqual(tts.phonemes("Hey SANJAYA, remind me."), "<Hey> IPA <, remind me.>")
+            self.assertEqual(tts.phonemes("Hey JARVIS, remind me."), "<Hey> IPA <, remind me.>")
 
 
 class FakePlayback:
@@ -281,15 +265,15 @@ class Turn(VoiceRuntime):
         """The transcript goes to `ask`, the reply is spoken, and voice.turn holds both."""
         utterance = {"samples": np.zeros(16000, np.float32), "start_ts": 1.0, "end_ts": 2.0}
         with (
-            mock.patch("agent.voice.turn.stt.transcribe", return_value="remind me to call Ravi"),
+            mock.patch("agent.voice.turn.stt.transcribe", return_value="remind me to call Mike"),
             mock.patch.object(speaker, "speak") as speak,
         ):
             from agent.voice import turn
 
             event = turn.answer(utterance, lambda text, details: f"OK: {text}", "talk")
-        self.assertEqual((event["text"], event["reply"]), ("remind me to call Ravi", "OK: remind me to call Ravi"))
+        self.assertEqual((event["text"], event["reply"]), ("remind me to call Mike", "OK: remind me to call Mike"))
         speak.assert_called_once()
-        self.assertEqual(speak.call_args.args[0], "OK: remind me to call Ravi")
+        self.assertEqual(speak.call_args.args[0], "OK: remind me to call Mike")
 
     def test_no_words_says_so(self):
         """An empty transcript is not sent to the model."""
@@ -344,3 +328,105 @@ class Turn(VoiceRuntime):
         with mock.patch.object(config, "VOICE_REQUEST_WAIT_S", 0.05), mock.patch("agent.voice.turn.audio.VAD") as vad:
             vad.return_value.segments.return_value = []
             self.assertIsNone(turn.request(lambda: np.zeros(1280, np.float32), time.time()))
+
+
+class WakeGate(unittest.TestCase):
+    """The two stages of the wake word: a sure score wakes, a "maybe" is checked once (no model needed)."""
+
+    def setUp(self) -> None:
+        """Import the wake module (its models load only in Detector)."""
+        from agent.voice import wake
+
+        self.wake = wake
+        self.audio = lambda: np.zeros(16000, np.float32)
+
+    def run_scores(self, gate, scores: list[float]) -> list[int]:
+        """Feed one score per frame and return the frames that woke."""
+        return [n for n, s in enumerate(scores, start=1) if gate.judge(n, s, self.audio)]
+
+    def test_sure_score_wakes_once(self):
+        """A score over the threshold wakes; the frames just after it do not wake again."""
+        gate = self.wake.Gate(0.5, 0.1, confirm=mock.Mock(return_value=False))
+        self.assertEqual(self.run_scores(gate, [0.0, 0.9, 0.95, 0.9, 0.0]), [2])
+
+    def test_maybe_is_checked_once_and_can_wake(self):
+        """A score under the threshold asks the second stage once, after the delay, and a yes is a wake."""
+        confirm = mock.Mock(return_value=True)
+        gate = self.wake.Gate(0.5, 0.1, confirm)
+        delay = round(config.WAKE_CHECK_DELAY_S * config.SAMPLE_RATE / self.wake.FRAME)
+        woke = self.run_scores(gate, [0.0, 0.3, 0.4, 0.2] + [0.0] * 10)
+        self.assertEqual(woke, [2 + delay])
+        confirm.assert_called_once()
+
+    def test_maybe_that_fails_the_check_is_not_checked_again(self):
+        """A "no" from the second stage: the same phrase does not ask Whisper over and over."""
+        confirm = mock.Mock(return_value=False)
+        gate = self.wake.Gate(0.5, 0.1, confirm)
+        self.assertEqual(self.run_scores(gate, [0.3] * 15), [])
+        confirm.assert_called_once()
+
+    def test_without_second_stage_a_maybe_is_ignored(self):
+        """check_threshold None: only the model decides, as before."""
+        gate = self.wake.Gate(0.5, None, confirm=mock.Mock(return_value=True))
+        self.assertEqual(self.run_scores(gate, [0.4] * 10), [])
+
+    def test_name_check_accepts_near_spellings_only(self):
+        """Near spellings of the name count; "Travis" (a near miss in the wake eval) and ordinary words do not."""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "RUNTIME", Path(tmp)):
+            for text, expected in (
+                ("Hey Javis.", True),
+                ("Hi Jarvis", True),
+                ("Hey Travis, the report", False),
+                ("I need the service.", False),
+            ):
+                with mock.patch.object(self.wake.stt, "transcribe", return_value=text):
+                    self.assertIs(self.wake.said_name(self.audio()), expected, text)
+
+
+class Conversation(VoiceRuntime):
+    """After a reply has been heard, the next request needs no wake word."""
+
+    def test_tab_reports_the_end(self):
+        """wait_heard returns once the tab posts /ended, and False after a stop."""
+        speaker.mark_tab()
+        out = speaker.speak("One.")
+        voice.ended({"utt": out["utt"]})
+        self.assertTrue(speaker.wait_heard(out))
+        again = speaker.speak("Two.")
+        speaker.stop("button")
+        self.assertFalse(speaker.wait_heard(again))
+
+    def test_local_speech_reports_the_end(self):
+        """On this machine, speak() returns after the last chunk and records voice.ended."""
+        plat = mock.Mock(play_audio=mock.Mock(side_effect=lambda path: FakePlayback(0.01)))
+        with mock.patch.object(speaker.platforms, "current", return_value=plat):
+            out = speaker.speak("One. Two.")
+        self.assertIn("voice.ended", self.kinds())
+        self.assertTrue(speaker.wait_heard(out))
+
+    def test_follow_up_opens_only_in_a_conversation(self):
+        """With the switch on, a heard reply sets follow_up, and the loop's next trigger is "follow-up"."""
+        from agent.voice import turn
+
+        spoken = {"utt": "x", "say_id": 0, "route": "tab", "chunks": 1, "audio_s": 0.1, "stopped": False}
+        with (
+            mock.patch.object(config, "VOICE_ECHO_TAIL_S", 0),
+            mock.patch.object(speaker, "wait_heard", return_value=True),
+        ):
+            off = turn.WakeLoop(mock.Mock(), use_wake=False, conversation=False)
+            off._open_follow_up(spoken, threading.Event())
+            on = turn.WakeLoop(mock.Mock(), use_wake=False, conversation=True)
+            on._open_follow_up(spoken, threading.Event())
+        self.assertFalse(off.follow_up.is_set())
+        self.assertEqual(on._woke(None), "follow-up")
+
+    def test_silent_follow_up_ends_quietly(self):
+        """No words after the reply: the agent does not say "Sorry", and opens no new follow-up."""
+        from agent.voice import turn
+
+        with mock.patch.object(turn.stt, "transcribe", return_value=""), mock.patch.object(speaker, "speak") as speak:
+            out = turn.answer(
+                {"samples": np.zeros(8000, np.float32), "start_ts": 0, "end_ts": 0.5}, mock.Mock(), "follow-up"
+            )
+        speak.assert_not_called()
+        self.assertIsNone(out["spoken"])

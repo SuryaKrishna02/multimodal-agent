@@ -56,14 +56,18 @@ async function busy(control, fn, { out, text } = {}) {
   control.disabled = true;
   control.classList.add("is-busy");
   if (isButton) control.textContent = control.dataset.busy || "Working…";
+  const task = out ? $(out).closest(".task-pane")?.id.replace("task-", "") : null;   // its button in the task list says so too
   if (out) working($(out), text || "Working…");
+  if (task) setTaskState(task, "Working…", "busy");
   try {
     const result = await fn();
     if (out) await pollEvents();   // the result arrives as an event; fetch it now instead of waiting for the next poll
+    if (task) setTaskState(task, result ? "Result ready" : "", "ok");
     return result;
   } catch (e) {
     toast(e.message, "error");
     if (out && $(out).querySelector(".working")) $(out).innerHTML = "";
+    if (task) setTaskState(task, "Failed", "bad");
   } finally {
     control.disabled = false;
     control.classList.remove("is-busy");
@@ -119,49 +123,100 @@ document.addEventListener("click", (e) => {
 });
 $("#lightbox").onclick = () => $("#lightbox").close();
 
-// --- Tabs (keys 1-9 and 0 switch tabs when you are not typing) --------------
-const TAB_REFRESH = {};   // tab name -> function that reloads it when shown (always_on.js adds some)
-const TABS = $$("#tabs button");
-function showTab(name) {
-  if (!$("#panel-" + name)) name = "serving";
-  if (!$("#panel-" + name).classList.contains("active")) window.scrollTo(0, 0);   // a new tab starts at its top
-  $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
+// --- Views (keys 1, 2 and 3 when you are not typing) ------------------------
+// Agent is the page people use: the conversation and the task buttons. Under the hood has one section per component,
+// and Benchmarks has the speed test and the scorecard. A link such as #memory opens that section.
+const TAB_REFRESH = {};   // section name -> function that reloads it when shown (always_on.js adds some)
+const TABS = $$("#tabs button[data-tab]");
+const VIEW_BUTTONS = $$("#views button");
+const ALIAS = { tasks: "agent", bench: "scorecard", benchmarks: "scorecard" };
+const store = {   // per-viewer conveniences only: a private window may refuse storage
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* not kept: fine */ } },
+};
+let currentTab = null;
+let hoodSection = store.get("hoodSection") || "serving";
+const viewOf = (name) => (name === "agent" ? "agent" : name === "scorecard" ? "bench" : "hood");
+function showHoodSection(name) {
+  hoodSection = name;
+  store.set("hoodSection", name);
+  $$("#view-hood .panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
   TABS.forEach((b) => {
     const on = b.dataset.tab === name;
     b.classList.toggle("active", on);
     b.setAttribute("aria-selected", String(on));
     b.tabIndex = on ? 0 : -1;
   });
-  history.replaceState(null, "", "#" + name);   // a reload stays on the same tab
+}
+function showTab(name) {
+  name = ALIAS[name] || name;
+  if (name === "hood") name = hoodSection;
+  if (name !== "agent" && !$("#panel-" + name)) name = "agent";
+  const view = viewOf(name);
+  if (name !== currentTab) window.scrollTo(0, 0);   // a new section starts at its top
+  currentTab = name;
+  document.body.dataset.view = view;
+  $$(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + view));
+  VIEW_BUTTONS.forEach((b) => {
+    const on = b.dataset.view === view;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
+  });
+  if (view === "hood") showHoodSection(name);
+  history.replaceState(null, "", "#" + name);   // a reload stays on the same section
   if (name === "brain") renderBrain();
   if (name === "memory") refreshMemory();
   if (name === "tools") refreshTools();
-  if (name === "scorecard") refreshScorecard();
+  if (name === "scorecard") { refreshScorecard(); renderBench(); }
+  if (name === "agent") TAB_REFRESH.tasks?.();
   TAB_REFRESH[name]?.();
 }
-const isTab = (name) => $("#panel-" + name).classList.contains("active");
+const isTab = (name) => currentTab === (ALIAS[name] || name);
+VIEW_BUTTONS.forEach((b) => (b.onclick = () => showTab(b.dataset.view)));
 TABS.forEach((b, i) => {
   b.id = "tab-" + b.dataset.tab;
   b.setAttribute("aria-controls", "panel-" + b.dataset.tab);
   $("#panel-" + b.dataset.tab).setAttribute("aria-labelledby", b.id);
   b.onclick = () => showTab(b.dataset.tab);
   b.onkeydown = (e) => {
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
     if (!step) return;
+    e.preventDefault();
     const next = TABS[(i + step + TABS.length) % TABS.length];
     showTab(next.dataset.tab);
     next.focus();
   };
 });
-$$("[data-go]").forEach((b) => (b.onclick = () => showTab(b.dataset.go)));
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-go]");
+  if (b) showTab(b.dataset.go);
+  const t = e.target.closest("[data-open-task]");   // a link from elsewhere to one pane of the Agent page
+  if (t) { showTab("agent"); openTask(t.dataset.openTask); }
+});
+
+// --- The assistant orb ("Jarvis", drawn by orb.js) -----------------------------------------------------------
+// Its state follows the voice (voice.js sets orb.voice) and the chat: it turns faster while it thinks, and pulses
+// while it listens or speaks.
+$$(".jarvis").forEach(mountOrb);
+const thinkingOrb = () => { const el = Object.assign(document.createElement("span"), { className: "jarvis xs" }); el.dataset.state = "thinking"; mountOrb(el); return el; };
+const orb = { voice: "idle" };
+const ORB_LABEL = { wake: 'say "Hey Jarvis"', listening: "listening…", thinking: "thinking…", speaking: "speaking" };
+function renderOrb() {
+  const busyVoice = orb.voice !== "idle" && orb.voice !== "wake";
+  const state = busyVoice ? orb.voice : chatPending ? "thinking" : orb.voice;
+  $$(".jarvis:not(.xs)").forEach((el) => (el.dataset.state = state));
+  $("#orb-label").textContent = ORB_LABEL[state] || "";
+}
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") setDrawer(false);
+  if (e.key === "Escape") { setDrawer(false); $("#model-menu").open = false; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-  if (e.key === "c") setChatHidden(!document.body.classList.contains("chat-hidden"));
   if (e.key === "d") setDetails(document.body.classList.contains("simple"));
-  const b = /^[0-9]$/.test(e.key) ? TABS[e.key === "0" ? 9 : Number(e.key) - 1] : undefined;
-  if (b) showTab(b.dataset.tab);
+  const b = { 1: "agent", 2: "hood", 3: "bench" }[e.key];
+  if (b) showTab(b);
+});
+document.addEventListener("click", (e) => {   // the model menu closes like a menu: a click outside it
+  if (!e.target.closest("#model-menu")) $("#model-menu").open = false;
 });
 
 // Sticky offsets follow the real height, because the header and the banners wrap.
@@ -169,24 +224,20 @@ new ResizeObserver(() => {
   const root = document.documentElement.style;
   root.setProperty("--header-h", $("#top").offsetHeight + "px");
   root.setProperty("--banner-h", $("#banners").offsetHeight + "px");
+  root.setProperty("--notice-h", $("#notices").offsetHeight + "px");
 }).observe(document.body);
 
-function setChatHidden(hidden) {
-  document.body.classList.toggle("chat-hidden", hidden);
-  $("#chat-toggle").textContent = hidden ? "Show chat" : "Hide chat";
-  localStorage.setItem("chatHidden", hidden ? "1" : "");
-}
-$("#chat-toggle").onclick = () => setChatHidden(!document.body.classList.contains("chat-hidden"));
-// Simple view is the default: each tab shows its main cards only. Details adds the extra cards, tables and hints.
+// Simple view is the default: each section shows its main cards only. Details adds the extra cards, tables and hints.
 function setDetails(on) {
   document.body.classList.toggle("simple", !on);
-  $("#detail-switch").textContent = on ? "Hide details" : "Show details";
-  $("#detail-switch").setAttribute("aria-checked", String(on));
-  localStorage.setItem("details", on ? "1" : "");
+  $$(".detail-switch").forEach((b) => {
+    b.textContent = on ? "Hide details" : "Show details";
+    b.setAttribute("aria-checked", String(on));
+  });
+  store.set("details", on ? "1" : "");
 }
-$("#detail-switch").onclick = () => setDetails(document.body.classList.contains("simple"));
-setDetails(!!localStorage.getItem("details"));
-setChatHidden(!!localStorage.getItem("chatHidden"));
+$$(".detail-switch").forEach((b) => (b.onclick = () => setDetails(document.body.classList.contains("simple"))));
+setDetails(!!store.get("details"));
 
 // --- Header state -------------------------------------------------------------
 let connectionLost = false;
@@ -206,6 +257,8 @@ async function refreshState() {
   const setDot = (id, ready) => { $(id).className = "dot" + (ready ? " on" : failed ? " failed" : ""); };
   setDot("#llm-dot", s.llm);
   setDot("#emb-dot", s.embed);
+  setDot("#model-dot", s.llm && s.embed);
+  $("#model-name").textContent = tierName(s.tier) + (s.llm && s.embed ? "" : failed ? " · failed" : " · starting");
   $("#llm-mem").textContent = serverStatus(s.llm, failed && !s.llm, s.llm_rss_gb);
   $("#emb-mem").textContent = serverStatus(s.embed, failed && !s.embed, s.embed_rss_gb);
   if (document.activeElement !== $("#tier")) $("#tier").value = s.tier;
@@ -302,9 +355,11 @@ const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // Light the tab of the component that just reported, so viewers can follow the agent as it works.
 const pingTimers = {};
 function ping(tab) {
-  $$(`[data-activity="${tab}"]`).forEach((p) => p.classList.add("live"));
-  clearTimeout(pingTimers[tab]);
-  pingTimers[tab] = setTimeout(() => $$(`[data-activity="${tab}"]`).forEach((p) => p.classList.remove("live")), 1600);
+  for (const t of tab === "other" ? [tab] : [tab, "any"]) {   // "any" is the Under the hood button
+    $$(`[data-activity="${t}"]`).forEach((p) => p.classList.add("live"));
+    clearTimeout(pingTimers[t]);
+    pingTimers[t] = setTimeout(() => $$(`[data-activity="${t}"]`).forEach((p) => p.classList.remove("live")), 1600);
+  }
 }
 
 // --- Activity drawer + event log -------------------------------------------------
@@ -393,6 +448,7 @@ const renderers = {
   "senses.screen.warning": (e) => addNotice("screen", e.message, "warn"),
   "hotkey.warning": (e) => addNotice("hotkey", e.message, "warn"),
   "hotkey.listening": (e) => {
+    if (e.trusted) dropNotice("hotkey");  // the warning of an earlier, untrusted start no longer applies
     const keys = e.combo.split("+").map((k) => k.replace(/[<>]/g, "")).map((k) => `<kbd>${esc(HOTKEY_NAMES[k] || k)}</kbd>`);
     $("#hotkey-tip").innerHTML = `Tip: press ${keys.join(" ")} anywhere to run this on your current screen.`;
     $("#hotkey-tip").hidden = false;
@@ -407,7 +463,8 @@ const renderers = {
   "task2.done": renderTask2,
   "hotkey.pressed": () => {
     if (replaying) return;
-    showTab("tasks");
+    showTab("agent");
+    openTask("task2");
     working($("#task2-out"), "Looking at your screen…");
     setTimeout(() => { if ($("#task2-out .working")) $("#task2-out").innerHTML = ""; }, 180000);
   },
@@ -699,9 +756,35 @@ const composer = { image: null, screen: false };
 const input = $("#chat-input");
 const growInput = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
 input.addEventListener("input", growInput);
+// Slash commands: "/" opens a small menu above the message box. skills.js adds /skill.
+const SLASH = {};   // name -> { hint, usage, run(argText) }
+function renderSlashMenu() {
+  const typing = input.value.match(/^\/(\w*)$/);   // only while the command word is being typed
+  const list = typing ? Object.entries(SLASH).filter(([k]) => k.startsWith(typing[1])) : [];
+  $("#slash-menu").innerHTML = list.map(([k, c]) => `<button type="button" data-slash="${k}"><b>/${k}</b><span>${esc(c.hint)}</span>
+    <small>${esc(c.usage)}</small></button>`).join("");
+  $("#slash-menu").hidden = !list.length;
+}
+const pickSlash = (name) => { input.value = `/${name} `; renderSlashMenu(); growInput(); input.focus(); };
+input.addEventListener("input", renderSlashMenu);
+$("#slash-menu").onclick = (e) => { const b = e.target.closest("[data-slash]"); if (b) pickSlash(b.dataset.slash); };
 input.addEventListener("keydown", (e) => {
+  const menu = !$("#slash-menu").hidden && $("#slash-menu [data-slash]");
+  if (menu && (e.key === "Tab" || e.key === "Enter")) { e.preventDefault(); pickSlash(menu.dataset.slash); return; }
+  if (e.key === "Escape") $("#slash-menu").hidden = true;
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#chat-form").requestSubmit(); }
 });
+// Run "/name text" as a command. Returns true when the message was a command, so it is not sent to the model.
+function runSlash(text) {
+  const m = text.match(/^\/(\w+)\s*([\s\S]*)$/);
+  if (!m) return false;
+  input.value = "";
+  growInput();
+  renderSlashMenu();
+  if (SLASH[m[1]]) SLASH[m[1]].run(m[2].trim());
+  else toast(`There is no command /${m[1]}. Type / to see the commands.`, "error");
+  return true;
+}
 function renderAttach() {
   const chips = [];
   if (composer.image) chips.push(`<span class="attach"><img alt="" src="${composer.image}"><button type="button" data-unattach="image" aria-label="Remove the picture">×</button></span>`);
@@ -711,7 +794,7 @@ function renderAttach() {
   $("#chat-screen").setAttribute("aria-pressed", String(composer.screen));
 }
 function attachFile(file) {
-  if (!file?.type.startsWith("image/")) { toast("Only pictures can go into the chat. Use the Tasks tab for audio and video.", "error"); return; }
+  if (!file?.type.startsWith("image/")) { toast('Only pictures can go into the chat. Use the "Voice note" or "Look at my screen" task for audio and video.', "error"); return; }
   const reader = new FileReader();
   reader.onload = () => { composer.image = reader.result; renderAttach(); input.focus(); };
   reader.readAsDataURL(file);
@@ -730,15 +813,18 @@ $("#chat").addEventListener("dragover", (e) => { e.preventDefault(); $("#chat").
 $("#chat").addEventListener("dragleave", (e) => { if (!$("#chat").contains(e.relatedTarget)) $("#chat").classList.remove("dropping"); });
 $("#chat").addEventListener("drop", (e) => { e.preventDefault(); $("#chat").classList.remove("dropping"); attachFile(e.dataTransfer.files[0]); });
 
-$$("[data-suggest]").forEach((b) => (b.onclick = () => {
+document.addEventListener("click", (e) => {   // delegated: skill examples are drawn after load
+  const b = e.target.closest("[data-suggest]");
+  if (!b) return;
   input.value = b.dataset.suggest;
   if (b.dataset.screen) { composer.screen = true; renderAttach(); }
   growInput();
   input.focus();
-}));
+});
 
 async function sendChat(text, voice = null) {
-  if (appState && !appState.llm) { toast("The language model is not ready yet. Check the Serving tab.", "error"); return; }
+  if (!voice && runSlash(text)) return;
+  if (appState && !appState.llm) { toast("The language model is not ready yet. The model menu at the top shows its state.", "error"); return; }
   const body = { text, with_screen: composer.screen, image: composer.image, voice };
   if (!text && !body.image && !body.with_screen) return;
   composer.image = null;
@@ -752,11 +838,14 @@ async function sendChat(text, voice = null) {
   const reply = addMsg("agent", "");
   reply.dataset.step = body.with_screen ? "Capturing your screen…" : "Thinking…";
   working(reply, "Thinking…");
+  reply.querySelector(".spinner").replaceWith(thinkingOrb());
   chatPending = reply;
   syncChatClear();
+  renderOrb();
   const out = await busy($("#chat-form .send"), () => api("/api/chat", body));
   chatPending = null;
   syncChatClear();
+  renderOrb();
   input.focus();
   if (!out) { reply.className = "msg agent error"; reply.textContent = "No reply: the request failed."; return; }
   if (out.images?.length) sent.querySelector(".msg-pics")?.replaceWith(Object.assign(document.createElement("div"),
@@ -869,16 +958,42 @@ document.addEventListener("click", async (e) => {
   if (!text) return;
   const out = await busy(b, () => api("/api/task4/feedback", { brief_id: Number(row.dataset.brief), rating, text }));
   if (out) {
-    row.innerHTML = `<span class="msg-meta">Thanks. Saved as feedback (${plural(out.pending, "note")} wait for the next reflection in the Evolve tab).</span>`;
+    row.innerHTML = `<span class="msg-meta">Thanks. Saved as feedback (${plural(out.pending, "note")} wait for the next reflection, under the hood in Evolve).</span>`;
   }
 });
+
+// --- Task rail: a list of task buttons. Each opens the controls and the last result of one task. ---------
+const TASK_OPEN = {};   // task id -> function that reloads its state when opened (mcp.js adds some)
+function openTask(id) {
+  $("#task-list").hidden = !!id;
+  $$(".task-pane").forEach((p) => (p.hidden = p.id !== "task-" + id));
+  if (!id) return;
+  $(`#task-${id} h3`).focus({ preventScroll: true });
+  TASK_OPEN[id]?.();
+}
+$$(".task-pane h3").forEach((h) => (h.tabIndex = -1));
+$$("[data-task]").forEach((b) => (b.onclick = () => openTask(b.dataset.task)));
+$$("[data-task-back]").forEach((b) => (b.onclick = () => {
+  const from = b.closest(".task-pane").id.replace("task-", "");
+  openTask(null);
+  $(`[data-task="${from}"]`).focus();
+}));
+// A short state on the task's button, so a task that runs or listens is visible from the list.
+function setTaskState(id, text, tone = "") {
+  const el = $(`[data-task-state="${id}"]`);
+  if (!el) return;
+  el.textContent = text;
+  el.className = "task-state" + (text && tone ? " " + tone : "");
+}
 
 // --- Tasks ------------------------------------------------------------------
 let recordingSince = null;
 const clockText = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 function setRecordingUI(recording) {
   if (recording && !recordingSince) recordingSince = Date.now();
+  if (!recording && recordingSince) setTaskState("task1", "");
   if (!recording) recordingSince = null;
+  if (recording) setTaskState("task1", "Recording " + clockText(Math.round((Date.now() - recordingSince) / 1000)), "live");
   $$("#rec-btn, #rec-btn2").forEach((b) => {
     if (b.disabled) return;   // busy() restores its own label
     b.textContent = recording ? `Stop and get action items (${clockText(Math.round((Date.now() - recordingSince) / 1000))})` : "Record voice note";
@@ -894,7 +1009,7 @@ async function toggleRecording(button) {
     await busy(button, () => api("/api/mic/start", {}));
   } else {
     const done = await busy(button, () => api("/api/mic/stop", {}), { out: "#task1-out", text: "Listening back and finding action items…" });
-    if (done && !isTab("tasks")) toast("Done. The action items are in the Tasks tab (press 6).");
+    if (done && !isTab("agent")) toast('Done. The action items are in the "Voice note" task on the Agent page (press 1).');
   }
   refreshState();
 }
@@ -911,7 +1026,7 @@ $("#img-file").onchange = sendFile("/api/task2/file", "#task2-out", "Looking at 
 $("#video-file").onchange = sendFile("/api/task2/video_file", "#task2-out", "Watching the video…");
 $("#watch-btn").onclick = (e) => busy(e.target, () => api("/api/task2/watch", { seconds: 10 }), { out: "#task2-out", text: "Recording 10 s of your screen, then looking at it…" });
 const lookNow = (e) => busy(e.target, () => api("/api/task2", {}), { out: "#task2-out", text: "Looking at your screen…" })
-  .then((done) => { if (done && !isTab("tasks")) toast("Done. The answer is in the Tasks tab (press 8)."); });
+  .then((done) => { if (done && !isTab("agent")) toast('Done. The answer is in the "Look at my screen" task on the Agent page (press 1).'); });
 $("#look-btn").onclick = lookNow;
 $("#look-btn2").onclick = lookNow;
 
@@ -958,7 +1073,7 @@ async function refreshMemory() {
   $("#mem-count").textContent = rows.length ? `(${num(rows.length)})` : "";
   $("#mem-clear").hidden = !rows.length;
   $("#mem-all").innerHTML = rows.map((m) => memRow(m)).join("")
-    || '<div class="none">No memories yet. Record a voice note in Tasks, or ask the chat to remember something.</div>';
+    || '<div class="none">No memories yet. Run the "Voice note" task, or ask the agent to remember something.</div>';
   const rejected = allEvents.filter((e) => e.kind === "memory.rejected").slice(-8).reverse();
   $("#mem-rejected").innerHTML = rejected.map((e) => `<div class="mem"><div><div class="mem-text">${esc(e.text)}</div>
     <div class="mem-meta">${kindTag(e.mem_kind)}<span>${esc(e.reason)}</span></div></div></div>`).join("")
@@ -1261,10 +1376,11 @@ const runLive = (component, button) => {
   }).finally(() => { if (out.querySelector(".working")) out.innerHTML = ""; });
 };
 
-showTab(location.hash.slice(1) || "serving");
+showTab(location.hash.slice(1) || "agent");
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));   // a link such as #evolve opens that tab
 setInterval(pollEvents, 700);
 setInterval(refreshState, 2000);
 pollEvents();
 refreshState();
 loadChat();
+renderOrb();

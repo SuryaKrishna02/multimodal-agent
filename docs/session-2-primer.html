@@ -854,7 +854,7 @@ self._drop(used)
 return out</pre></div><div class="code-wrap"><div class="code-file">agent/senses/ambient.py  hear()</div><pre class="code" data-blocks='[[149, 151, 3]]' data-src="agent/senses/ambient.py:149-151">text = stt.transcribe(u["samples"], engine)
 meta = {"start_ts": u["start_ts"], "end_ts": u["end_ts"], "source": source}
 mem_id = episodic.store(text, kind="transcript", meta=meta, ts=u["start_ts"], media=("audio", u["samples"]))</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Keep 1 s of silence</b><span class="txt">With no speech, only the last 1 s stays, so the next word keeps its start.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Finished at a pause</b><span class="txt">The <span class="term" tabindex="0" data-def="Voice activity detection: Silero VAD marks the parts of the audio that hold speech.">VAD</span> marks speech. A segment ends after 0.6 s of silence.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Cut at 28 s</b><span class="txt">Speech with no pause is cut at 28 s, under the 30 s audio limit of Gemma 4.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Text and an audio vector</b><span class="txt">Whisper writes the text. The raw transcript row also gets an audio vector.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Whisper heard "Kriya" for "Priya", and a Task 3 answer failed. Test speech to text on the names that you use.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>10 synthetic clips from macOS voices.</dd><dt>Output</dt><dd>One transcript from each engine.</dd><dt>Metrics</dt><dd>Word error rate (limit 15%): Gemma 4.4%, Whisper 2.6%.</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Keep 1 s of silence</b><span class="txt">With no speech, only the last 1 s stays, so the next word keeps its start.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Finished at a pause</b><span class="txt">The <span class="term" tabindex="0" data-def="Voice activity detection: Silero VAD marks the parts of the audio that hold speech.">VAD</span> marks speech. A segment ends after 0.6 s of silence.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Cut at 28 s</b><span class="txt">Speech with no pause is cut at 28 s, under the 30 s audio limit of Gemma 4.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Text and an audio vector</b><span class="txt">Whisper writes the text. The raw transcript row also gets an audio vector.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Whisper misheard a name, and a Task 3 answer failed. Test speech to text on the names that you use.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>10 synthetic clips from macOS voices.</dd><dt>Output</dt><dd>One transcript from each engine.</dd><dt>Metrics</dt><dd>Word error rate (limit 15%): Gemma 4.4%, Whisper 2.6%.</dd></dl></li></ol>
   </div>
 </section>
 
@@ -1163,7 +1163,7 @@ rows = episodic.query_rows(
 )
 return [f"({time.strftime('%H:%M', time.localtime(r['ts']))}, {r['kind']}) {r['text']}" for r in rows]</pre></div><p class="fexplain">The day's summaries, facts, action items and screen episodes. Raw transcripts that a summary covers are left out.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">(09:00, summary) Picked the lakeside lodge for the
-   offsite on the 14th; Priya sends the deposit.
+   offsite on the 14th; Emily sends the deposit.
 (09:07, action_item) Finish the budget slides
    (due Wednesday evening)
 (10:40, fact) The budget review with Anita is on
@@ -1324,7 +1324,7 @@ event "evolve.rollback" {"version": 1}</pre></div>
     <li class="next-card"><b>Native skills</b><span>A skill will have a manifest, an input schema and a permission level.</span></li>
     <li class="next-card"><b>MCP connectors</b><span>Paste a standard <code>mcpServers</code> config. Each server will show as on-device or remote.</span></li>
     <li class="next-card"><b>Proactive alerts</b><span>The agent will see a failing test on your screen and say it out loud.</span></li>
-    <li class="next-card"><b>&ldquo;Remind me to call Ravi&rdquo;</b><span>A small reminders MCP server that we write will set it. When it is due, the agent will speak it.</span></li>
+    <li class="next-card"><b>&ldquo;Remind me to call Mike&rdquo;</b><span>A small reminders MCP server that we write will set it. When it is due, the agent will speak it.</span></li>
   </ul>
   <p class="next-date">Part 3: November 28th, 2026</p>
 </section>

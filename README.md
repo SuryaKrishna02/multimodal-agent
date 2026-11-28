@@ -6,7 +6,7 @@ with open models. Built for a three-part coding series of the Multimodal AI Grou
 
 - Inference: [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`, pinned and checksummed ([docs/SETUP.md](docs/SETUP.md)). Verified on Apple Metal. Other OSes and GPUs plug in as single files ([CONTRIBUTING.md](CONTRIBUTING.md))
 - Model: Gemma 4 **E4B** (default) or **E2B**: text, image, audio and screen video (sampled frames, no soundtrack) in; text out
-- Voice: Kokoro-82M (ONNX, on the CPU) speaks the replies in the dashboard tab; a "Hey Sanjaya" wake word trained on your machine
+- Voice: Kokoro-82M (ONNX, on the CPU) speaks the replies in the dashboard tab; a "Hey Jarvis" wake word (openWakeWord's pretrained model)
 - Memory search: EmbeddingGemma-2 (text, image and audio in one vector space)
 - Always-on listening: Whisper large-v3-turbo on MLX (Apple Silicon), behind an accelerator hook
 - Bolt-ons: native skills (a manifest per skill) and an MCP client that loads a standard `mcpServers` config
@@ -56,15 +56,17 @@ agent/
   sql.py             opens every SQLite file and always closes it
   voice/tts.py       Kokoro text to speech, one sentence at a time (Session 3)
   voice/speaker.py   speech to the dashboard tab or this machine; stopping it from any process (Session 3)
-  voice/wake.py      the "Hey Sanjaya" wake word: three small ONNX models, 80 ms at a time (Session 3)
+  voice/wake.py      the "Hey Jarvis" wake word: three small ONNX models, 80 ms at a time (Session 3)
   voice/turn.py      a spoken turn: wake or Talk, record, Whisper, the chat, speech (Session 3)
   proactive.py       alerts with a cool-down: feed, notification, speech; due reminders; Task 5 watcher (Session 3)
   skills/            native skills: manifest.json + skill.py per folder (Session 3)
+  skill_author.py    /skill: the local model drafts a skill, the user approves, then it is written
   mcp_client.py      MCP client: labels, ${NAME} secrets, enabled tools and tiers (Session 3)
 mcp_servers/reminders/  a tiny reminders MCP server, the other side of the protocol (Task 6)
-dashboard/           FastAPI + one HTML page; one tab per component, plus tasks and the scorecard
+dashboard/           FastAPI + one HTML page: Agent (chat and task buttons), Under the hood, Benchmarks
   chat.py            the chat: text, picture, screen or voice in; reply with recalled memories; kept over restarts
-  voice.py, mcp.py, proactive.py   Session 3: the voice stream, the MCP panel, Task 5
+  voice.py, mcp.py, skills.py, proactive.py   Session 3: the voice stream, the MCP and Skills panes, Task 5
+  static/orb.js      the Jarvis orb: a blue hologram drawn on a canvas
 cli.py               every action from the terminal
 evals/<component>/   case format (docstring), loader, scorer
 evals/synthetic/     generates the synthetic cases (speech, screenshots, tool calls, memories)
@@ -74,14 +76,14 @@ data/evals/          synthetic/ (generated) and user/ (yours), git-ignored
 docs/                SETUP, PLATFORMS, EVALS, architecture.md (diagram), VERIFICATION, WAKE_WORD, ROADMAP, BACKLOG, index.html + session-N-primer.html (slides)
 CONTRIBUTING.md      add an OS or a GPU backend with one file
 tests/               plug-in contract tests (stdlib only)
-scripts/             setup.py, doctor.py, smoke_test.py, soak.py (hours of daemon load), train_wake_word.py (+ wakeword/)
-requirements/        base.txt (portable pins), lock-<os>.txt, nodeps-<os>.txt, dev.txt (ruff, pyright, complexipy), wakeword-train.txt
+scripts/             setup.py, doctor.py, smoke_test.py, soak.py (hours of daemon load)
+requirements/        base.txt (portable pins), lock-<os>.txt, nodeps-<os>.txt, dev.txt (ruff, pyright, complexipy)
 ```
 
 ## Status
 
 Sessions 1 (the core loop) and 2 (always on and learning) are complete. Session 3 (voice, bolt-ons and what comes
-next) is on the branch `feature/session_3`: Kokoro speech in the dashboard tab, the "Hey Sanjaya" wake word, proactive
+next) is on the branch `feature/session_3`: Kokoro speech in the dashboard tab, the "Hey Jarvis" wake word, proactive
 alerts, native skills, the MCP client with a reminders server, and Tasks 5 and 6. [docs/ROADMAP.md](docs/ROADMAP.md)
 maps the components to pi, OpenClaw and Pi Durable. [docs/VERIFICATION.md](docs/VERIFICATION.md) lists what we tested
 and what we found.

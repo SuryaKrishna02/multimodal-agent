@@ -10,7 +10,10 @@ Object.assign(DESCRIBE, {
   "voice.stopped": (e) => `Silent ${Math.round(e.after_stop_s * 1000)} ms after the stop`,
   "voice.error": (e) => e.error,
   "voice.wake": (e) => `Wake word ${e.state}`,
-  "voice.listening": (e) => `Listening for a request (${e.trigger})`,
+  "voice.wake_check": (e) => `Wake word check: Whisper heard "${short(e.text, 60)}" (${e.woke ? "wake" : "no wake"})`,
+  "voice.ended": () => "Finished speaking",
+  "voice.conversation": (e) => `Conversation ${e.on ? "on: after each reply, just keep talking" : "off"}`,
+  "voice.listening": (e) => (e.trigger === "follow-up" ? "Your turn: listening for a follow-up" : `Listening for a request (${e.trigger})`),
   "voice.recorded": (e) => `Request recorded (${e.audio_s} s): thinking`,
   "voice.turn": (e) => (e.text ? `Heard "${short(e.text, 80)}" (speech to text ${e.stt_s} s, reply ${e.reply_s} s)${e.interrupted ? ", interrupted: not spoken" : ""}` : `No request heard after the ${e.trigger}`),
 });
@@ -76,7 +79,12 @@ function queueChunk(e) {
     u.end = voice.tail = at + buffer.duration;
     u.nodes.push(node);
     vstate.phase = null;   // thinking is over: this tab speaks now
-    node.onended = () => { u.nodes = u.nodes.filter((n) => n !== node); showSpeaking(); };
+    node.onended = () => {
+      u.nodes = u.nodes.filter((n) => n !== node);
+      // The whole reply has been heard: in a conversation, the agent listens for a follow-up from now on.
+      if (e.last && !u.stopped) api("/api/voice/ended", { utt: e.utt }).catch(() => {});
+      showSpeaking();
+    };
     if (!u.played) {
       u.played = true;
       setTimeout(() => api("/api/voice/played", { utt: e.utt, say_ts: u.sayTs }).catch(() => {}), Math.max(0, (at - voice.ctx.currentTime) * 1000));
@@ -106,8 +114,9 @@ const showSpeaking = () => renderVoiceState();
 // What the voice does now, shown in the header and on the Voice tab: waiting for the wake word, listening to a
 // request, thinking, or speaking. Events come from the voice stream (fast, while Voice is on) and from the 1 s poll
 // of the event log (always); `seen` makes sure each event counts once.
-const vstate = { wake: false, phase: null, otherUntil: 0, seen: 0, timer: null };
-const VSTATE_LABEL = { wake: 'Say "Hey Sanjaya"', listening: "Listening…", thinking: "Thinking…", speaking: "Speaking" };
+const vstate = { wake: false, phase: null, followUp: false, otherUntil: 0, seen: 0, timer: null };
+const VSTATE_LABEL = { wake: 'Say "Hey Jarvis"', listening: "Listening…", thinking: "Thinking…", speaking: "Speaking" };
+const voiceLabel = (s) => (s === "listening" && vstate.followUp ? "Your turn…" : VSTATE_LABEL[s] || "");
 
 function voiceState() {
   const here = Object.values(voice.utts).some((u) => u.nodes.length);   // this tab plays
@@ -120,9 +129,11 @@ function renderVoiceState() {
   for (const el of document.querySelectorAll(".voice-state")) {
     el.dataset.state = s;
     el.hidden = s === "idle";
-    el.querySelector(".vs-label").textContent = VSTATE_LABEL[s] || "";
+    el.querySelector(".vs-label").textContent = voiceLabel(s);
   }
   $("#voice-stop").hidden = s !== "speaking";
+  orb.voice = s;
+  renderOrb();
 }
 
 // Speech that this tab does not play (this machine's speakers, or another tab): estimate when it ends from the
@@ -141,6 +152,7 @@ function noteVoiceState(e) {
   if (e.kind === "voice.listening") vstate.phase = "listening";
   if (e.kind === "voice.recorded") vstate.phase = "thinking";
   if (e.kind === "voice.turn" && !e.text) vstate.phase = null;   // with text, it thinks until the speech starts
+  if (e.kind === "voice.listening") vstate.followUp = e.trigger === "follow-up";
   if (e.kind === "voice.error" || (e.kind === "voice.wake" && e.state === "off")) vstate.phase = null;
   if (e.kind === "voice.stop") vstate.otherUntil = 0;
   if (e.kind === "voice.chunk" && !(e.route === "tab" && voice.source)) {
@@ -170,14 +182,27 @@ function showWake(on, modelReady) {
   b.classList.toggle("paused", !on);
   b.setAttribute("aria-checked", String(on));
   b.textContent = on ? "Wake word on" : "Wake word off";
-  b.title = modelReady ? "Listen for \"Hey Sanjaya\" on this machine's microphone" : "The wake-word model is not trained yet: use Talk";
+  b.title = modelReady ? "Listen for \"Hey Jarvis\" on this machine's microphone" : "The wake-word model is missing (python3 scripts/setup.py --only wake): use Talk";
 }
 $("#wake-switch").onclick = () => {
   const on = $("#wake-switch").getAttribute("aria-checked") !== "true";
   api("/api/voice/wake", { on }).then((s) => showWake(s.wake, s.wake_model)).catch((err) => toast(err.message, "error"));
 };
+function showConversation(on, seconds) {
+  const b = $("#conv-switch");
+  b.classList.toggle("paused", !on);
+  b.setAttribute("aria-checked", String(on));
+  b.textContent = on ? "Conversation on" : "Conversation off";
+  b.title = on
+    ? `After each reply, keep talking: it listens for ${seconds ?? 8} s without "Hey Jarvis". Silence ends the conversation.`
+    : 'Each request needs "Hey Jarvis" or Talk';
+}
+$("#conv-switch").onclick = () => {
+  const on = $("#conv-switch").getAttribute("aria-checked") !== "true";
+  api("/api/voice/conversation", { on }).then((s) => showConversation(s.conversation, s.follow_up_s)).catch((err) => toast(err.message, "error"));
+};
 const talk = () => api("/api/voice/talk", {}).catch((err) => toast(err.message, "error"));
-$("#talk-btn").onclick = talk;
+$$("#talk-btn, [data-talk]").forEach((b) => (b.onclick = talk));
 document.addEventListener("keydown", (e) => {
   if (e.key !== "t" || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
@@ -195,6 +220,7 @@ async function refreshVoice() {
   }
   if (s.error) addNotice("voice", s.error, "warn");
   showWake(s.wake, s.wake_model);
+  showConversation(s.conversation, s.follow_up_s);
   renderVoice();
 }
 TAB_REFRESH.voice = refreshVoice;
@@ -250,13 +276,17 @@ renderers["voice.wake"] = (e) => {
 };
 renderers["voice.recorded"] = (e) => { noteVoiceState(e); if (!replaying) $("#wake-status").textContent = "Thinking…"; };
 renderers["voice.error"] = (e) => { noteVoiceState(e); if (!replaying) toast(e.error, "error"); };
-renderers["voice.listening"] = (e) => { noteVoiceState(e); if (!replaying) $("#wake-status").textContent = "Listening… say your request."; };
+renderers["voice.listening"] = (e) => {
+  noteVoiceState(e);
+  if (!replaying) $("#wake-status").textContent = e.trigger === "follow-up" ? "Your turn: keep talking, or stay quiet to end." : "Listening… say your request.";
+};
+renderers["voice.conversation"] = (e) => { if (!replaying) showConversation(e.on); };
 renderers["voice.turn"] = (e) => {
   noteVoiceState(e);
   if (replaying) return;
-  $("#wake-status").textContent = e.text ? `Heard: "${short(e.text, 60)}"` : "No request heard.";
+  $("#wake-status").textContent = e.text ? `Heard: "${short(e.text, 60)}"` : e.note === "conversation ended" ? 'Conversation ended: say "Hey Jarvis".' : "No request heard.";
   if (e.text) loadChat();   // the spoken request and its reply are in the chat now
 };
 
 // Show the wake-word state from the start, not only once the Voice tab opens.
-api("/api/voice/state").then((s) => showWake(s.wake, s.wake_model)).catch(() => {});
+api("/api/voice/state").then((s) => { showWake(s.wake, s.wake_model); showConversation(s.conversation, s.follow_up_s); }).catch(() => {});

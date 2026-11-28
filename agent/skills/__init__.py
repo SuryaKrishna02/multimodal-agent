@@ -25,6 +25,7 @@ from agent import events
 
 SKILLS_DIR = Path(__file__).parent
 RISKY_EFFECTS = {"writes", "runs_code", "network"}  # these need tier confirm or blocked
+PROBLEMS: dict[str, list[str]] = {}  # folder name -> why its last load was refused, for the dashboard
 MANIFEST_SCHEMA = {
     "type": "object",
     "required": ["name", "description", "version", "tier", "effects", "input_schema", "examples", "entry"],
@@ -96,8 +97,10 @@ def load_one(folder: Path) -> dict | None:
     except Exception as e:  # any error in skill.py (a SyntaxError, a NameError at import) refuses only this skill
         manifest, problems, fn = {}, [f"{type(e).__name__}: {e}"], None
     if problems or fn is None:
+        PROBLEMS[folder.name] = problems
         events.emit("skills.error", skill=folder.name, problems=problems)
         return None
+    PROBLEMS.pop(folder.name, None)
     from agent import tools
 
     t = tools.Tool(

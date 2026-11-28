@@ -1,7 +1,7 @@
 """Text-to-speech eval: how soon the first sound is ready, and whether the speech is understood.
 
 Cases: data/evals/{synthetic,user}/tts/sentences.jsonl, one JSON object per line:
-    {"id": "s01", "text": "I set a reminder to call Ravi at 3:15."}
+    {"id": "s01", "text": "I set a reminder to call Mike at 3:15."}
 Write numbers as digits: Whisper writes them that way, so "3:15" in the reference matches "3:15" in the transcript.
 
 Each sentence goes through the real voice path: `tts.sentences()` cuts it, Kokoro writes the first piece (timed:

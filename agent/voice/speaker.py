@@ -11,6 +11,7 @@ reaches it, and reports `voice.stopped`. These events also hold the times for th
     voice.say      the text arrived          voice.chunk    one sentence is written (synth_s)
     voice.played   the first chunk is heard  voice.stop     someone asked for silence
     voice.stopped  playback ended early (after_stop_s)
+    voice.ended    the last chunk finished playing (`wait_heard` waits for it, so a conversation listens only then)
 """
 
 import json
@@ -89,7 +90,8 @@ def speak(
             It closes the gap where the turn could start speaking just after the stop event. Defaults to None.
 
     Returns:
-        dict: `utt` (the utterance id), `route`, `chunks` written and `stopped` (True if a stop cut it short).
+        dict: `utt` (the utterance id), `say_id` (the id of its voice.say event), `route`, `chunks` written,
+            `audio_s` (seconds of speech written) and `stopped` (True if a stop cut it short).
     """
     utt = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     folder = config.VOICE_DIR / utt
@@ -98,7 +100,7 @@ def speak(
     start = events.emit("voice.say", utt=utt, text=text, reason=reason, route=route)
     pieces = tts.sentences(tts.speakable(text))  # voice.say keeps the text as written, for the dashboard
     local = _LocalPlayer(utt, start) if route == "local" else None
-    written = 0
+    written, seconds = 0, 0.0
     for n, piece in enumerate(pieces):
         if _stopped_after(start["id"]) or (cancel is not None and cancel.is_set()):
             break
@@ -107,6 +109,7 @@ def speak(
         path = folder / f"{n}.wav"
         sf.write(path, audio, config.TTS_SAMPLE_RATE)
         written += 1
+        seconds += len(audio) / config.TTS_SAMPLE_RATE
         events.emit(
             "voice.chunk",
             utt=utt,
@@ -121,8 +124,53 @@ def speak(
             break
     if local:
         local.finish()
+    stopped = bool(_stopped_after(start["id"]))
+    played_all = local is not None and local.started and written == len(pieces) and not local.cut
+    if played_all and not stopped:
+        events.emit("voice.ended", utt=utt, route="local")
     _prune()
-    return {"utt": utt, "route": route, "chunks": written, "stopped": bool(_stopped_after(start["id"]))}
+    return {
+        "utt": utt,
+        "say_id": start["id"],
+        "route": route,
+        "chunks": written,
+        "audio_s": round(seconds, 2),
+        "stopped": stopped,
+    }
+
+
+def _ended(say_id: int, utt: str) -> bool | None:
+    """True if the utterance has played to its end, False if a stop came, None while it may still play."""
+    for e in events.since(say_id, "voice."):
+        if e["kind"] == "voice.ended" and e.get("utt") == utt:
+            return True
+        if e["kind"] == "voice.stop":
+            return False
+    return None
+
+
+def wait_heard(spoken: dict, cancel: threading.Event | None = None) -> bool:
+    """Wait until the listener has heard all of an utterance.
+
+    On this machine `speak()` returns after the last chunk. The tab plays on after it, and reports `voice.ended`.
+
+    Args:
+        spoken (dict): The result of `speak()`.
+        cancel (threading.Event | None, optional): Stop waiting when it is set. Defaults to None.
+
+    Returns:
+        bool: True if it played to the end. False if it was stopped, cancelled, or the tab did not report the end
+            within the length of the speech plus `config.VOICE_TAB_ALIVE_S` (a closed tab).
+    """
+    if not spoken.get("chunks") or spoken.get("stopped"):
+        return False
+    deadline = time.monotonic() + spoken.get("audio_s", 0.0) + config.VOICE_TAB_ALIVE_S
+    while time.monotonic() < deadline and not (cancel is not None and cancel.is_set()):
+        done = _ended(spoken["say_id"], spoken["utt"])
+        if done is not None:
+            return done
+        time.sleep(config.VOICE_POLL_S)
+    return False
 
 
 class _LocalPlayer:
@@ -135,7 +183,7 @@ class _LocalPlayer:
             utt (str): The utterance id.
             start (dict): Its `voice.say` event; a stop request newer than this one stops it.
         """
-        self.utt, self.start, self.current, self.started = utt, start, None, False
+        self.utt, self.start, self.current, self.started, self.cut = utt, start, None, False, False
 
     def _wait(self) -> bool:
         """Wait until the chunk that plays has ended. Return False if a stop request cut it off."""
@@ -143,6 +191,7 @@ class _LocalPlayer:
             request = _stopped_after(self.start["id"])
             if request:
                 self.current.stop()
+                self.cut = True
                 events.emit("voice.stopped", utt=self.utt, route="local", after_stop_s=time.time() - request["ts"])
                 return False
             time.sleep(config.VOICE_POLL_S)
@@ -163,6 +212,7 @@ class _LocalPlayer:
             self.current = platforms.current().play_audio(path)
         except Unsupported as e:
             events.emit("voice.error", utt=self.utt, error=f"No dashboard tab listens, and {e}")
+            self.cut = True
             return False
         if not self.started:
             self.started = True

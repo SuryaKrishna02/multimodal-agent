@@ -137,7 +137,7 @@ def calculator(expression: str) -> float:
     },
     examples=[
         "remember that my dentist is on Friday",
-        "note down that Ravi's number changed",
+        "note down that Mike's number changed",
         "don't let me forget the demo",
     ],
 )

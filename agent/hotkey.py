@@ -10,7 +10,17 @@ from agent import config, events, platforms
 
 
 def listen(on_press):
-    """Start listening in a background thread. on_press() runs in its own thread."""
+    """Start listening in a background thread. on_press() runs in its own thread.
+
+    The `hotkey.listening` event says whether the OS trusts this process, so the dashboard can clear the warning
+    of an earlier start, which it replays from the event log.
+
+    Args:
+        on_press (Callable[[], None]): Runs each time the combo is pressed.
+
+    Returns:
+        object: The listener of the OS plug-in.
+    """
 
     def fire():
         events.emit("hotkey.pressed", combo=config.HOTKEY)
@@ -21,5 +31,5 @@ def listen(on_press):
     warning = plat.hotkey_warning()
     if warning:
         events.emit("hotkey.warning", message=warning)
-    events.emit("hotkey.listening", combo=config.HOTKEY)
+    events.emit("hotkey.listening", combo=config.HOTKEY, trusted=warning is None)
     return listener

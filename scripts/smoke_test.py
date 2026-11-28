@@ -142,7 +142,7 @@ def check_voice(tmp: Path) -> bool:
     from agent.voice import tts
 
     try:
-        speech = tts.synthesize("Remind me to call Ravi at four.")
+        speech = tts.synthesize("Remind me to call Mike at four.")
     except FileNotFoundError as e:
         print(f"FAIL  voice  {e}")
         return False
@@ -152,7 +152,7 @@ def check_voice(tmp: Path) -> bool:
         {"type": "text", "text": "Transcribe this audio."},
         {"type": "input_audio", "input_audio": {"data": b64(wav), "format": "wav"}},
     ]
-    return check("voice", parts, ["ravi"])
+    return check("voice", parts, ["mike"])
 
 
 def check_mcp(tmp: Path) -> bool:

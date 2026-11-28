@@ -1,4 +1,4 @@
-"""Wake-word eval: missed wakes and false wakes of "Hey Sanjaya".
+"""Wake-word eval: missed wakes and false wakes of "Hey Jarvis".
 
 Cases: data/evals/{synthetic,user}/wake/
     pos-01.wav   any recording, 16 kHz mono (`evals add` converts it)
@@ -19,8 +19,8 @@ Metrics:
                            openWakeWord's 10.7 h validation set.)
     negative_minutes       how much audio without the phrase the rate is based on
 
-The synthetic clips use voices that never made a training clip. Your own recordings are the real test: record new
-ones (not the clips you trained with) and add each with `python cli.py evals add wake clip.wav --wakes 1`.
+The synthetic clips are Kokoro and OS voices, which are cleaner than a real voice. Your own recordings are the real
+test: add each with `python cli.py evals add wake clip.wav --wakes 1`.
 """
 
 import json
@@ -46,10 +46,10 @@ def load_cases(cases_dir: Path):
         list[dict]: Items with `wav`, `wakes` and `note`.
 
     Raises:
-        NoCases: If the folder has no labeled recording, or the wake-word model is not trained.
+        NoCases: If the folder has no labeled recording, or the wake-word model is not downloaded.
     """
     if not config.WAKE_MODEL.exists():
-        raise NoCases(f"{config.WAKE_MODEL.name} is not trained yet (docs/WAKE_WORD.md)")
+        raise NoCases(f"{config.WAKE_MODEL.name} is missing: python3 scripts/setup.py --only wake")
     items = []
     for label in sorted(cases_dir.glob("*.json")) if cases_dir.is_dir() else []:
         wav = label.with_suffix(".wav")

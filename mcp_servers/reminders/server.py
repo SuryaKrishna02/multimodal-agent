@@ -97,7 +97,7 @@ def add_reminder(text: str, in_minutes: float | None = None, at: str | None = No
     """Set a reminder. Give in_minutes (from now) or at ("HH:MM", local time), not both.
 
     Args:
-        text (str): What to remind the user of, for example "call Ravi".
+        text (str): What to remind the user of, for example "call Mike".
         in_minutes (float | None): Minutes from now.
         at (str | None): Local time "HH:MM".
 

@@ -9,7 +9,7 @@ Run the whole agent on your own machine. Everything stays on it: the model serve
 |---|---|
 | Machine | Verified: Apple Silicon Mac (M4, 24 GB, macOS 27.0.1). Other OSes and GPUs: see [PLATFORMS.md](PLATFORMS.md) |
 | Memory | 16 GB works with the E2B tier. 24 GB or more is better for E4B |
-| Disk | about 13 GB (both model tiers, the embedding model, Whisper large-v3-turbo, Kokoro and the wake-word models). Training your own wake word needs about 25 GB more, once ([WAKE_WORD.md](WAKE_WORD.md)) |
+| Disk | about 13 GB (both model tiers, the embedding model, Whisper large-v3-turbo, Kokoro and the wake-word models) |
 | Python | 3.10 or newer (tested with 3.13.3) |
 | Optional | `ffmpeg` + `ffprobe` for screen-video input and the two synthetic video cases of the task2 eval (the doctor prints the install command for your OS) |
 | Optional | [Node.js](https://nodejs.org) for MCP servers started with `npx`, and [uv](https://docs.astral.sh/uv/) for those started with `uvx` (Session 3). The reminders server of this repo needs neither |
@@ -31,8 +31,8 @@ python3 scripts/setup.py
 - **EmbeddingGemma-2** (Q8_0) + its projector, for memory search over text, images and audio
 - **Silero VAD** v6.2.3 (ONNX file only)
 - **Kokoro-82M** (int8 ONNX, 92 MB) and its 54 voices (28 MB), the agent's voice (Session 3), group `tts`
-- openWakeWord's two frozen feature models (2.4 MB), group `wake`. The "Hey Sanjaya" classifier itself is trained
-  on your machine: [WAKE_WORD.md](WAKE_WORD.md)
+- openWakeWord's two frozen feature models and its pretrained "hey jarvis" classifier (3.7 MB, release v0.5.1),
+  group `wake`
 - **Whisper large-v3-turbo** in MLX format (1.6 GB), for always-on listening. It is the `stt_pins` of your
   accelerator plug-in, so only an accelerator with a `transcribe` hook downloads it (on a Mac: Metal)
 - a `.venv` with the pinned packages (`requirements/lock-<os>.txt`, else `requirements/base.txt`)
@@ -79,33 +79,47 @@ finishes its current job; a second Ctrl-C kills it), then the model servers.
 - `python cli.py dashboard --no-daemon` starts only the dashboard and the model servers, as in Session 1. Ctrl-C
   stops the model servers too, unless a daemon uses them.
 
-Tabs 1 to 9, then 0,
-follow the session agenda. Session 1 has Serving, Senses, Brain, Memory and Tools. Session 2 adds Always on and Evolve.
-Tasks come next, Session 3 adds Voice (9), and Scorecard (0) comes last.
+The page has three views. Switch with the buttons at the top, or with the keys 1, 2 and 3:
 
-Press the number keys to switch tabs. The page is light only. The chat sits on the right. Press C to hide it and give
-the tabs more room. A bar at the bottom opens the Activity log (the event log). A dot on a tab lights up while that part
-of the agent is working.
+1. **Agent** (the start page): the conversation, with a large message box, and a **Tasks** list beside it. Press a
+   task to open its controls and its last result in place; "All tasks" goes back to the list. A task that records,
+   watches or runs shows that on its button. Below the tasks, **Connect** has the MCP servers and Skills panes (see
+   [Voice, skills and MCP](#voice-skills-and-mcp-session-3)). The Jarvis orb, a blue hologram of light streaks drawn
+   on a canvas, turns slowly while idle, turns fast while the agent thinks, and pulses while it listens or speaks.
+   Type `/` in the message box for commands, such as `/skill`.
+2. **Under the hood**: one section per component, in a menu on the left: Serving, Senses, Brain, Memory, Tools, Always
+   on, Evolve and Voice. A dot beside a section lights up while that part of the agent works, and a dot on the Under
+   the hood button lights up when any part does. The Activity bar at the bottom opens the event log.
+3. **Benchmarks**: the speed test of the language model and the scorecard of the evals.
 
-Each tab opens in a simple view with its main cards only. Press Show details at the top (or the D key) to add the
-other cards, the tables, the explanations and the metrics that have no target. The page remembers the choice.
+The model menu at the top shows if both model servers are up; open it to see their memory and to switch between E4B
+and E2B. The page is light only.
 
-The chat takes text, a picture, your screen or your voice:
+Under the hood and Benchmarks open in a simple view with the main cards only. Press Show details (or the D key) to add
+the other cards, the tables, the explanations and the metrics that have no target. The page remembers the choice.
 
-- **Picture**: pick a file, paste one (Cmd+V / Ctrl+V), or drop one on the chat panel. It goes to Gemma 4 as an image.
+The message box takes text, a picture, your screen or your voice:
+
+- **Picture**: pick a file, paste one (Cmd+V / Ctrl+V), or drop one on the conversation. It goes to Gemma 4 as an image.
 - **Screen**: one screenshot goes with the next message, then the switch turns itself off.
-- **Voice**: press Voice, speak, press it again. The dashboard records with the same microphone code as Task 1, keeps
-  only the speech (Silero VAD) and turns it into text with `config.STT_ENGINE` (Whisper; Gemma when your accelerator has
-  no Whisper). The text is sent as your message, and the bubble says which engine heard it. The Mic switch at the top
-  still wins.
+- **Dictate**: press Dictate, speak, press it again. The dashboard records with the same microphone code as Task 1,
+  keeps only the speech (Silero VAD) and turns it into text with `config.STT_ENGINE` (Whisper; Gemma when your
+  accelerator has no Whisper). The text is sent as your message, and the bubble says which engine heard it. The Mic
+  switch at the top still wins.
+- **Talk** (key T): a spoken turn. The agent records until you pause, answers in the conversation and speaks the reply.
+  "Wake word" above the conversation does the same when you say "Hey Jarvis".
+- **Conversation** (on by default): after a reply has played, just keep talking. The header says "Your turn…" and the
+  agent listens for `config.VOICE_FOLLOW_UP_S` (8 s) without the wake word. Silence ends the conversation, and the
+  next request needs "Hey Jarvis" or Talk again. Turn it off for a call where the microphone hears other people.
 
 Under each reply, "Recalled N memories" opens the memories that search put into the prompt, with their match scores.
-"Inspect in Brain" opens that turn in the Brain tab: the context budget, the exact request and the reply. A daily
-brief (from the daemon at 18:00, or from the Tasks tab) also arrives in the chat, with buttons for your feedback.
+"Inspect in Brain" opens that turn in Under the hood, Brain: the context budget, the exact request and the reply. A
+daily brief (from the daemon at 18:00, or from the Daily brief task) also arrives in the conversation, with buttons for
+your feedback.
 
-The Brain tab shows only what you sent from the dashboard. Its Show menu adds the requests of the command line, the
-evals and the daemon, which write to the same event log. The Evolve tab lists each prompt patch that the validator or
-the generality gate refused, with the reason.
+Brain shows only what you sent from the dashboard. Its Show menu adds the requests of the command line, the evals and
+the daemon, which write to the same event log. Evolve lists each prompt patch that the validator or the generality
+gate refused, with the reason.
 
 The chat has sessions. New chat starts an empty conversation, and the old one stays under History, where you can open
 it again or delete it. The model reads only the messages of the open session (the last 6, `config.CHAT_HISTORY_MESSAGES`).
@@ -113,8 +127,8 @@ Long-term memory is shared by all sessions: each reply gets the 3 best matches (
 `search_memory` call of the model returns 3 more for its own query. The number of stored memories has no limit. Each session is one file in `data/runtime/chats/`, so it survives a restart of the
 dashboard. Deleting a session deletes its messages and its pictures. Long-term memories stay.
 
-When a tool call waits for your approval, Approve and Deny appear in the chat, above the message box. With the chat
-hidden or on a narrow window, they appear in a banner at the top instead. After you decide, the chat history holds the
+When a tool call waits for your approval, Approve and Deny appear in the conversation, above the message box. On the
+other views, or on a narrow window, they appear in a banner at the top instead. After you decide, the chat history holds the
 outcome, so you can ask the model "did that work?"
 
 If a model server stops unexpectedly, the dashboard restarts it on the current tier. While the daemon runs, the daemon
@@ -141,7 +155,7 @@ Switch to the small model for any command: `AGENT_TIER=e2b .venv/bin/python cli.
 ## Always on (Session 2)
 
 The daemon is a separate process. It runs jobs from a queue, on a schedule (`config.SCHEDULE`) and on
-triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The dashboard shows it in the Always on tab.
+triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The dashboard shows it under the hood, in Always on.
 `python cli.py dashboard` starts it for you. To run it without the dashboard:
 
 ```bash
@@ -163,7 +177,7 @@ triggers, and it records each step in `data/runtime/checkpoints.sqlite`. The das
 **Timed listening.** `--for` stores an end time; when it passes, the daemon turns the switch off. `--window` limits
 listening to a daily window of local time (an end before the start crosses midnight); the switch stays on and the
 daemon listens again when the window opens. Without `--window`, `LISTEN_WINDOW` in `agent/config.py` applies (None =
-any time); `--window any` turns it off for this switch. The Always on tab has the same two options next to the
+any time); `--window any` turns it off for this switch. Always on (under the hood) has the same two options next to the
 listening switch. The Mic switch at the top still pauses the microphone over all of these.
 
 For the live demo of Task 4, you can run some feedback rounds before the session:
@@ -235,25 +249,47 @@ only after a click). In Google Meet, present the dashboard as a **Chrome tab** a
 shares only the audio of the presented tab. Without a dashboard tab, the agent speaks through this machine's speakers.
 
 ```bash
-.venv/bin/python cli.py say "Hello, I am Sanjaya."    # speak; --local for this machine's speakers
-.venv/bin/python cli.py wake test                     # the wake word, live (after training it)
+.venv/bin/python cli.py say "Hello, I am Jarvis."     # speak; --local for this machine's speakers
+.venv/bin/python cli.py wake test                     # the wake word, live: say "Hey Jarvis"
 ```
 
-- **Talk to it:** in the Voice tab (key 9), press **Talk** (key T) or turn on **Wake word** and say "Hey Sanjaya".
-  The request and the reply appear in the chat. **Stop speaking** (key S) silences it.
-- **The wake word** is trained once on your machine, with about 40 clips of your voice: [WAKE_WORD.md](WAKE_WORD.md).
-- **MCP:** in the Tools tab, under MCP servers, paste a standard `mcpServers` config (the JSON that Claude Desktop,
-  Cursor or VS Code use). Write API keys as `"${NAME}"` and set `NAME` in the environment of the process that
-  connects: a key typed into the JSON is refused. Connect a server, tick the tools the model may use, and set each
-  tool's tier. Every tool starts as `confirm`.
+- **Talk to it:** on the Agent page, press **Talk** (key T) or turn on **Wake word** and say "Hey Jarvis".
+  The request and the reply appear in the conversation. **Stop speaking** (key S) silences it.
+- **The wake word** is openWakeWord's pretrained "hey jarvis" model: setup downloads it, nothing is trained. A real voice
+  often scores under its threshold, so a lower "maybe" score sends the last 2 s to Whisper, which must hear "Jarvis"
+  (about 1 s more before it wakes). `cli.py wake test` prints each wake, each "maybe" score and what Whisper heard. Add
+  recordings to the wake eval (docs/EVALS.md).
+- **Conversation:** once you are talking, the switch beside "Wake word" lets you go on without the wake word (see
+  the Agent page above).
+- **MCP:** on the Agent page, below the tasks, open **MCP servers** and **+ Add a server**. Pick **Local command**
+  (the command, one argument per row, environment variables, an optional working folder) or **Remote URL** (the URL
+  and headers). An environment variable or a header takes its value from a variable of this machine's environment,
+  which the form writes as `"${NAME}"`: the value itself is never saved. "See the JSON" shows the entry the form
+  builds. Edit and Remove are on each server's card. **Paste JSON** still takes a standard `mcpServers` config (the
+  JSON that Claude Desktop, Cursor or VS Code use), and it replaces the whole list. Then connect a server, tick the
+  tools the model may use, and set each tool's tier. Every tool starts as `confirm`. Set `NAME` in the environment of
+  the process that connects (the dashboard, or the daemon).
 - **Task 6, a voice-set reminder:** the reminders server of this repo is in the list by default. Connect it, tick
-  `add_reminder`, set it to `safe`, then say "Hey Sanjaya, remind me to call Ravi in two minutes". The daemon checks
+  `add_reminder`, set it to `safe`, then say "Hey Jarvis, remind me to call Mike in two minutes". The daemon checks
   for due reminders every 15 s and speaks them; run `python cli.py daemon install` once after an update, so the
-  launchd daemon runs the new code.
-- **Task 5, proactive alerts:** in the Tasks tab, turn on **Watching**. When a test run fails on screen, the agent says
-  so out loud, shows a notification and writes it to the feed. The dashboard runs it, because the terminal that
+  launchd daemon runs the new code. The task "Spoken reminder" on the Agent page checks each of these steps live and
+  links to the place that fixes a missing one.
+- **Task 5, proactive alerts:** on the Agent page, open the task "Speak up when a test fails" and turn on
+  **Watching**. When a test run fails on screen, the agent says so out loud, shows a notification and writes it to the
+  feed. The dashboard runs it, because the terminal that
   started the dashboard holds the Screen Recording permission.
 - **Native skills** are folders in `agent/skills/` with a `manifest.json`. They load at start; see
   `agent/skills/__init__.py` for the format and the rule that a skill which writes, runs code or uses the network
-  cannot be `safe`.
+  cannot be `safe`. On the Agent page, below the tasks, **Skills** lists each folder with its tier and effects, says
+  why a skill did not load, and puts an example into the message box when you press it. After you add or edit a
+  folder, press **Reload skills**: no restart needed. "Write one by hand" there shows the folder layout and a manifest to
+  copy.
+- **Teach a new skill:** type `/skill` and a description in the message box (for example `/skill convert between
+  dollars, euros and pounds at rates I give`), or use "Teach Jarvis a new skill" in the Skills pane. The local model
+  writes a draft (about 30 s on E4B): name, description, examples and `skill.py`. The draft shows in the conversation
+  and nothing is written yet. Read the code, edit it if you want, and pick the tier: a draft always starts at
+  `confirm`, and the model never picks a tier. "What the code does" comes from reading the code's imports and calls,
+  so a skill that writes files, runs programs or uses the network cannot be `safe`. This check is a hint, not a
+  sandbox: read the code before you press **Create skill**. Create checks the draft again, writes
+  `agent/skills/<name>/`, and loads it at once. If the code fails to load, the folder is removed again.
 - **What comes next:** [ROADMAP.md](ROADMAP.md) maps these components to pi, OpenClaw and Pi Durable.

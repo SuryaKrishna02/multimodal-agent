@@ -104,6 +104,13 @@ PINS = [
         "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f",
         "wake",
     ),
+    # openWakeWord's pretrained "hey jarvis" classifier (the last stage), same release. Hashed 2026-11-27.
+    Pin(
+        f"{OWW}/hey_jarvis_v0.1.onnx",
+        "models/wakeword/hey_jarvis_v0.1.onnx",
+        "94a13cfe60075b132f6a472e7e462e8123ee70861bc3fb58434a73712ee0d2cb",
+        "wake",
+    ),
 ]
 
 

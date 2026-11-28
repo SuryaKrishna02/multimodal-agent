@@ -551,8 +551,8 @@ class EvalScoring(unittest.TestCase):
         """Misheard -> hearing; heard but not read -> retrieval; read but answered wrong -> answer."""
         from evals.task3 import eval as task3
 
-        item = {"must_mention": [["priya"]], "unanswerable": False}
-        heard_ok, heard_bad = ["Priya sends the deposit"], ["Kriya sends the deposit"]
+        item = {"must_mention": [["emily"]], "unanswerable": False}
+        heard_ok, heard_bad = ["Emily sends the deposit"], ["Emmy sends the deposit"]
         self.assertEqual(task3.failed_at(item, False, heard_bad, heard_bad), "hearing")
         self.assertEqual(task3.failed_at(item, False, heard_ok, ["the offsite is on the 14th"]), "retrieval")
         self.assertEqual(task3.failed_at(item, False, heard_ok, heard_ok), "answer")

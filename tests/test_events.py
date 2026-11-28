@@ -32,3 +32,35 @@ class EventIdTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HotkeyTrustTest(unittest.TestCase):
+    """Check that a trusted start can clear the hotkey warning of an earlier start in the replayed log."""
+
+    def listening(self, warning: str | None) -> dict:
+        """Start the hotkey with a fake OS plug-in and return the `hotkey.listening` payload.
+
+        Args:
+            warning (str | None): What the fake `hotkey_warning()` returns.
+
+        Returns:
+            dict: The keyword arguments of the `hotkey.listening` event.
+        """
+        from agent import hotkey
+
+        plat = mock.MagicMock()
+        plat.hotkey_warning.return_value = warning
+        with (
+            mock.patch.object(hotkey.platforms, "current", return_value=plat),
+            mock.patch.object(hotkey.events, "emit") as emit,
+        ):
+            hotkey.listen(lambda: None)
+        return dict(next(c.kwargs for c in emit.call_args_list if c.args == ("hotkey.listening",)))
+
+    def test_a_trusted_start_says_so(self):
+        """No warning from the plug-in: the event carries `trusted=True`."""
+        self.assertTrue(self.listening(None)["trusted"])
+
+    def test_an_untrusted_start_says_so(self):
+        """A warning from the plug-in: the event carries `trusted=False`."""
+        self.assertFalse(self.listening("not trusted")["trusted"])

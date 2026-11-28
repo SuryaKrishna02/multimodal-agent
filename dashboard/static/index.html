@@ -7,26 +7,36 @@
 <title>Multimodal Agent</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-view="agent">
 <header id="top">
   <div class="brand">
+    <span class="jarvis sm" aria-hidden="true"></span>
     <h1>Multimodal Agent</h1>
     <span class="tagline">Runs entirely on this device</span>
   </div>
+  <nav id="views" role="tablist" aria-label="Views">
+    <button role="tab" data-view="agent" title="Talk to the agent and run its tasks (key 1)">Agent</button>
+    <button role="tab" data-view="hood" title="Each part of the agent, and what it did for each message (key 2)">Under the hood<i class="ping" data-activity="any"></i><span id="tools-badge" class="badge" hidden></span></button>
+    <button role="tab" data-view="bench" title="Speed test and the quality scorecard (key 3)">Benchmarks</button>
+  </nav>
   <div class="status">
-    <label class="field" for="tier">Model
-      <select id="tier" title="Which Gemma 4 model to run. Switching restarts the language model.">
-        <option value="e4b">Gemma 4 E4B</option><option value="e2b">Gemma 4 E2B</option>
-      </select>
-    </label>
-    <span class="stat" title="Language model server. It reads text, images and audio."><i id="llm-dot" class="dot"></i>Language model <span id="llm-mem" class="muted"></span></span>
-    <span class="stat" title="Embedding server. It powers memory search."><i id="emb-dot" class="dot"></i>Embeddings <span id="emb-mem" class="muted"></span></span>
-    <button id="mic-switch" class="mic" role="switch" aria-checked="true" title="Pause or allow the microphone everywhere. The agent only records when you press Record.">Mic ready</button>
+    <details id="model-menu" class="menu">
+      <summary title="Model servers. Open to switch the model."><i id="model-dot" class="dot"></i><span id="model-name">Gemma 4</span><span class="chev" aria-hidden="true">▾</span></summary>
+      <div class="menu-body">
+        <label class="field" for="tier">Model
+          <select id="tier" title="Which Gemma 4 model to run. Switching restarts the language model.">
+            <option value="e4b">Gemma 4 E4B</option><option value="e2b">Gemma 4 E2B</option>
+          </select>
+        </label>
+        <div class="stat" title="Language model server. It reads text, images and audio."><i id="llm-dot" class="dot"></i>Language model <span id="llm-mem" class="muted"></span></div>
+        <div class="stat" title="Embedding server. It powers memory search."><i id="emb-dot" class="dot"></i>Embeddings <span id="emb-mem" class="muted"></span></div>
+        <p class="hint">E2B is smaller: less memory, faster replies. Switching restarts the language model.</p>
+      </div>
+    </details>
+    <button id="mic-switch" class="mic" role="switch" aria-checked="true" title="Pause or allow the microphone everywhere. The agent only records when you ask it to.">Mic ready</button>
     <button id="voice-switch" class="mic paused" role="switch" aria-checked="false" title="Play the agent's voice in this tab. Chrome needs one click before a page may play sound. In Google Meet, present this tab and turn on its audio.">Voice off</button>
     <span class="voice-state" data-state="idle" hidden role="status" aria-live="polite"><span class="vs-anim" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="vs-label"></span></span>
     <button id="voice-stop" class="small danger" hidden title="Stop speaking now (key S)">Stop speaking</button>
-    <button id="detail-switch" class="small" role="switch" aria-checked="false" title="Show or hide the extra cards, tables and explanations on every tab (key D)">Show details</button>
-    <button id="chat-toggle" class="small" aria-controls="chat" title="Show or hide the chat (key C)">Hide chat</button>
   </div>
 </header>
 
@@ -34,27 +44,288 @@
 <div id="notices" role="status"></div>
 
 <main>
-  <section id="content">
-    <div id="tabs" role="tablist" aria-label="Sections">
-      <button role="tab" data-tab="serving"><span class="tab-title"><kbd>1</kbd>Serving<i class="ping" data-activity="serving"></i></span><span class="tab-sub">Local models</span></button>
-      <button role="tab" data-tab="senses"><span class="tab-title"><kbd>2</kbd>Senses<i class="ping" data-activity="senses"></i></span><span class="tab-sub">Hear and see</span></button>
-      <button role="tab" data-tab="brain"><span class="tab-title"><kbd>3</kbd>Brain<i class="ping" data-activity="brain"></i></span><span class="tab-sub">Inside a request</span></button>
-      <button role="tab" data-tab="memory"><span class="tab-title"><kbd>4</kbd>Memory<i class="ping" data-activity="memory"></i></span><span class="tab-sub">What it recalls</span></button>
-      <button role="tab" data-tab="tools"><span class="tab-title"><kbd>5</kbd>Tools<i class="ping" data-activity="tools"></i><span id="tools-badge" class="badge" hidden></span></span><span class="tab-sub">What it can do</span></button>
-      <button role="tab" data-tab="daemon"><span class="tab-title"><kbd>6</kbd>Always on<i class="ping" data-activity="daemon"></i><i id="daemon-dot" class="dot" title="Daemon"></i></span><span class="tab-sub">Runs on its own</span></button>
-      <button role="tab" data-tab="evolve"><span class="tab-title"><kbd>7</kbd>Evolve<i class="ping" data-activity="evolve"></i></span><span class="tab-sub">Learns from you</span></button>
-      <button role="tab" data-tab="tasks"><span class="tab-title"><kbd>8</kbd>Tasks<i class="ping" data-activity="tasks"></i></span><span class="tab-sub">Run the agent</span></button>
-      <button role="tab" data-tab="voice"><span class="tab-title"><kbd>9</kbd>Voice<i class="ping" data-activity="voice"></i></span><span class="tab-sub">Speaks out loud</span></button>
-      <button role="tab" data-tab="scorecard"><span class="tab-title"><kbd>0</kbd>Scorecard</span><span class="tab-sub">How well it works</span></button>
+  <!-- Agent: the conversation, and a rail of task buttons. This is the page people use. -->
+  <section class="view" id="view-agent" aria-label="Agent">
+    <div id="chat" aria-label="Chat">
+      <div class="chat-head">
+        <h2 id="chat-title"><span class="jarvis sm" aria-hidden="true"></span>Jarvis <span id="orb-label" class="muted"></span></h2>
+        <button id="wake-switch" class="mic paused" role="switch" aria-checked="false" title="Listen for the wake word on this machine's microphone">Wake word off</button>
+        <button id="conv-switch" class="mic" role="switch" aria-checked="true" title="After each reply, keep talking without the wake word">Conversation on</button>
+        <span id="wake-status" class="muted"></span>
+        <button id="chat-history" class="small" aria-expanded="false" aria-controls="chat-sessions" title="Earlier chats, saved on this device">History</button>
+        <button id="chat-new" class="small" disabled title="Start a new chat. This one stays in History. Long-term memories are shared by all chats.">New chat</button>
+      </div>
+      <div id="chat-sessions" hidden>
+        <p class="hint">Each chat has its own conversation. All chats share the same long-term memory.</p>
+        <div id="chat-session-list"></div>
+      </div>
+      <div id="chat-empty">
+        <div class="welcome">
+          <span class="jarvis lg" aria-hidden="true"></span>
+          <div class="jv-name">Jarvis</div>
+          <h2>What can I help with?</h2>
+          <p>Type, talk, paste a picture or share your screen. I recall your memories, use tools, and run on this machine only.</p>
+        </div>
+        <div class="suggest">
+          <button type="button" data-suggest="What do I need to do tomorrow?"><b>Plan</b>What do I need to do tomorrow?</button>
+          <button type="button" data-suggest="What did we decide about the offsite this morning?"><b>Recall</b>What did we decide about the offsite this morning?</button>
+          <button type="button" data-suggest="What is wrong on my screen, and how do I fix it?" data-screen="1"><b>Look</b>What is wrong on my screen?</button>
+          <button type="button" data-suggest="Remember that I have a dentist appointment next Tuesday at 3pm"><b>Remember</b>I have a dentist appointment next Tuesday at 3pm</button>
+        </div>
+        <p class="hint keys">Say "Hey Jarvis" with the wake word on, or press <kbd>T</kbd> to talk. <kbd>Enter</kbd> sends, <kbd>Shift</kbd>+<kbd>Enter</kbd> adds a line. Paste or drop a picture anywhere here. Type <kbd>/</kbd> for commands, such as <code>/skill</code> to teach me a new skill.</p>
+      </div>
+      <div id="chat-log" aria-live="polite"></div>
+      <div id="chat-approvals" role="alert" hidden></div>
+      <form id="chat-form">
+        <div id="slash-menu" hidden aria-label="Commands"></div>
+        <div id="chat-attach" hidden></div>
+        <textarea id="chat-input" rows="1" aria-label="Message" placeholder="Message the agent…" autocomplete="off"></textarea>
+        <div class="composer-bar">
+          <label class="tool-btn" title="Attach a picture (or paste one)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>
+            <span>Picture</span><input type="file" id="chat-file" accept="image/*"></label>
+          <button type="button" id="chat-screen" class="tool-btn" aria-pressed="false" title="Send one screenshot with this message">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+            <span>Screen</span></button>
+          <button type="button" id="chat-voice" class="tool-btn" aria-pressed="false" title="Dictate: speak, press again, and the text is sent as your message">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            <span>Dictate</span></button>
+          <button type="button" id="talk-btn" class="talk" title="Hands-free: speak your request and hear the reply (key T)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M8 8v8M16 8v8M4 11v2M20 11v2"/></svg>Talk</button>
+          <button class="primary send" data-busy="Sending…">Send</button>
+        </div>
+      </form>
     </div>
 
+    <aside id="rail" aria-label="Tasks">
+      <div id="task-list">
+        <div class="rail-head"><h2>Tasks</h2><p>Each one uses the whole agent: senses, memory, the model and tools.</p></div>
+        <button type="button" class="task-btn" data-task="task1">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+          <span class="task-txt"><b>Voice note to action items</b><span>Speak, then get a to-do list</span><span class="task-state" data-task-state="task1"></span></span></button>
+        <button type="button" class="task-btn" data-task="task2">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span>
+          <span class="task-txt"><b>Look at my screen</b><span>What it sees, and a fix if something is wrong</span><span class="task-state" data-task-state="task2"></span></span></button>
+        <button type="button" class="task-btn" data-task="task3">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/></svg></span>
+          <span class="task-txt"><b>Ambient recall</b><span>Hear a conversation, ask about it later</span><span class="task-state" data-task-state="task3"></span></span></button>
+        <button type="button" class="task-btn" data-task="task4">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg></span>
+          <span class="task-txt"><b>Daily brief</b><span>Learns from your feedback</span><span class="task-state" data-task-state="task4"></span></span></button>
+        <button type="button" class="task-btn" data-task="task5">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          <span class="task-txt"><b>Speak up when a test fails</b><span>Watches the screen for you</span><span class="task-state" data-task-state="task5"></span></span></button>
+        <button type="button" class="task-btn" data-task="task6">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M5 3 2 6M19 3l3 3"/></svg></span>
+          <span class="task-txt"><b>Spoken reminder</b><span>Ask out loud, through an MCP server</span><span class="task-state" data-task-state="task6"></span></span></button>
+
+        <div class="rail-head connect-head"><h2>Connect</h2><p>Give the agent more tools. Every tool still passes the same permission checks.</p></div>
+        <button type="button" class="task-btn" data-task="mcp">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg></span>
+          <span class="task-txt"><b>MCP servers</b><span>Connect a server, pick its tools and their tiers</span><span class="task-state" data-task-state="mcp"></span></span></button>
+        <button type="button" class="task-btn" data-task="skills">
+          <span class="task-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span>
+          <span class="task-txt"><b>Skills</b><span>Small Python tools that run inside the agent</span><span class="task-state" data-task-state="skills"></span></span></button>
+      </div>
+
+      <div class="task-pane" id="task-task1" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Voice note to action items</h3>
+        <p class="hint">Speak, stop, and get a transcript with a list of what to do. Both are saved to memory.</p>
+        <div class="row"><button id="rec-btn2" class="primary">Record voice note</button>
+          <label class="file">Upload audio file<input type="file" id="wav-file2" accept="audio/*"></label></div>
+        <div id="task1-out" class="result"></div>
+      </div>
+
+      <div class="task-pane" id="task-task2" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Look at my screen</h3>
+        <p class="hint">The agent says what it sees and suggests a fix if something is wrong.</p>
+        <div class="row"><button id="look-btn" class="primary">Capture screen now</button>
+          <button id="watch-btn" data-busy="Recording…">Record 10 s video</button></div>
+        <div class="row"><label class="file">Upload screenshot<input type="file" id="img-file" accept="image/*"></label>
+          <label class="file">Upload video<input type="file" id="video-file" accept="video/*"></label></div>
+        <p id="hotkey-tip" class="tip" hidden></p>
+        <div id="task2-out" class="result"></div>
+      </div>
+
+      <div class="task-pane" id="task-task3" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Ambient recall</h3>
+        <p class="hint">Replay the recorded morning conversation as if it started at 09:00, or turn on always-on listening in
+          <button type="button" class="link" data-go="daemon">Always on</button>. Then ask about it.</p>
+        <div class="row"><button id="replay-btn" class="primary" data-busy="Replaying…">Replay the morning conversation</button>
+          <label class="field" for="replay-speed">Speed <select id="replay-speed"><option value="0">no waiting</option><option value="4">4× real time</option><option value="1">real time</option></select></label></div>
+        <div id="task3-heard" class="heard"></div>
+        <form id="ask-form" class="row"><input id="ask-q" aria-label="Question about earlier events" placeholder="What did we decide about the offsite venue this morning?">
+          <button class="primary" data-busy="Thinking…">Ask</button></form>
+        <div id="task3-out" class="result"></div>
+      </div>
+
+      <div class="task-pane" id="task-task4" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Daily brief</h3>
+        <p class="hint">Writes today's brief from summaries, facts, action items and screen episodes. Tell it what to change, then reflect:
+          the next version of its prompt appears in <button type="button" class="link" data-go="evolve">Evolve</button>.</p>
+        <div class="row"><button id="brief-btn" class="primary" data-busy="Writing…">Write today's brief</button></div>
+        <div id="task4-out" class="result"></div>
+        <form id="feedback-form" class="row" hidden><input id="feedback-text" aria-label="Feedback" placeholder="For example: too long, and put the deadlines first">
+          <button type="button" data-rating="1">👍 Good</button><button type="button" data-rating="-1" class="primary">Send feedback</button></form>
+        <div id="task4-reflect" class="result"></div>
+      </div>
+
+      <div class="task-pane" id="task-task5" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Speak up when a test fails</h3>
+        <p class="hint">The agent looks at the screen every few seconds. When the screen changed, Gemma checks it for a failed
+          test run, and a match is spoken, shown as a notification and written to the feed with the reason.</p>
+        <div class="row"><button id="t5-switch" class="mic paused" role="switch" aria-checked="false">Watching off</button>
+          <button id="t5-check" data-busy="Looking…">Check the screen now</button></div>
+        <div id="t5-out" class="result"></div>
+      </div>
+
+      <div class="task-pane" id="task-task6" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Spoken reminder</h3>
+        <p class="hint">Say "Hey Jarvis, remind me to call Mike in two minutes". The chat answers through the reminders MCP
+          server, and the daemon speaks the reminder when it is due.</p>
+        <ul id="t6-checks" class="checks"></ul>
+        <div class="row"><button type="button" class="primary" data-talk>Talk</button>
+          <button type="button" data-suggest="Remind me to call Mike in two minutes">Type it instead</button></div>
+      </div>
+
+      <div class="task-pane" id="task-mcp" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>MCP servers</h3>
+        <p class="hint">Add a server, connect it, then tick the tools the model may use and set each tool's tier. Each
+          tool starts as <span class="tag confirm">confirm</span>, because a server's own hints come from code we do not
+          control.</p>
+        <ol class="setup-steps"><li>Add a server</li><li>Connect</li><li>Tick tools, set tiers</li></ol>
+        <div id="mcp-servers"></div>
+
+        <details class="mcp-add" id="mcp-add">
+          <summary><span id="mcp-form-title">+ Add a server</span></summary>
+          <div class="mcp-form">
+            <div class="seg-tabs" role="tablist" aria-label="Kind of server">
+              <button type="button" role="tab" data-mcp-kind="local" aria-selected="true">Local command</button>
+              <button type="button" role="tab" data-mcp-kind="remote" aria-selected="false">Remote URL</button>
+              <button type="button" role="tab" data-mcp-kind="json" aria-selected="false">Paste JSON</button>
+            </div>
+
+            <div data-mcp-panel="local remote">
+              <label class="form-field">Name
+                <input id="mcp-name" placeholder="for example github" autocomplete="off" spellcheck="false">
+                <small>Letters, digits, - and _. Its tools appear as name__tool.</small></label>
+            </div>
+
+            <div data-mcp-panel="local">
+              <label class="form-field">Command
+                <input id="mcp-command" placeholder="npx" autocomplete="off" spellcheck="false">
+                <small>The program that starts the server: npx, uvx, python, or a full path.</small></label>
+              <div class="form-field"><span>Arguments</span>
+                <div id="mcp-args" class="rows"></div>
+                <button type="button" class="link add-row" data-add-row="arg">+ Add argument</button>
+                <small>One per row, in order. For example <code>-y</code>, then the package name.</small></div>
+              <div class="form-field"><span>Environment variables</span>
+                <div id="mcp-env" class="rows"></div>
+                <button type="button" class="link add-row" data-add-row="env">+ Add variable</button>
+                <small>The server gets each variable from this machine's environment when it starts. The value is never
+                  saved, so keys stay out of the config file.</small></div>
+              <label class="form-field">Working folder <em>(optional)</em>
+                <input id="mcp-cwd" placeholder="the folder to start in" autocomplete="off" spellcheck="false"></label>
+            </div>
+
+            <div data-mcp-panel="remote" hidden>
+              <label class="form-field">URL
+                <input id="mcp-url" placeholder="https://example.com/mcp" autocomplete="off" spellcheck="false"></label>
+              <div class="form-field"><span>Headers</span>
+                <div id="mcp-headers" class="rows"></div>
+                <button type="button" class="link add-row" data-add-row="header">+ Add header</button>
+                <small>Each header's whole value comes from an environment variable, for example
+                  <code>SEARCH_AUTH="Bearer …"</code>.</small></div>
+              <p class="hint step-bad small-hint">Remote: every call to this server leaves this machine, unless the URL is this machine.</p>
+            </div>
+
+            <div data-mcp-panel="local remote">
+              <details class="more"><summary>See the JSON</summary><pre id="mcp-preview"></pre></details>
+              <div class="row"><button type="button" id="mcp-add-btn" class="primary" data-busy="Checking…">Add server</button>
+                <button type="button" id="mcp-cancel" hidden>Cancel</button></div>
+            </div>
+
+            <div data-mcp-panel="json" hidden>
+              <p class="hint small-hint">The standard <code>mcpServers</code> JSON that Claude Desktop, Cursor or VS Code use.
+                It replaces the whole list. Write keys as <code>"${NAME}"</code> in <code>env</code> or <code>headers</code>.</p>
+              <textarea id="mcp-config" rows="10" spellcheck="false" aria-label="mcpServers config"></textarea>
+              <div class="row"><button type="button" id="mcp-save" class="primary" data-busy="Checking…">Use this config</button></div>
+            </div>
+            <pre id="mcp-problems" class="step-bad" hidden></pre>
+          </div>
+        </details>
+      </div>
+
+      <div class="task-pane" id="task-skills" hidden>
+        <button type="button" class="back" data-task-back>‹ All tasks</button>
+        <h3>Skills</h3>
+        <p class="hint">A skill is a small Python tool that runs inside the agent. The model picks a skill like any tool,
+          and every call passes the same permission checks. Press an example to try it in the conversation.</p>
+        <form id="skill-describe" class="skill-describe">
+          <label class="form-field">Teach Jarvis a new skill
+            <textarea id="skill-desc" rows="3" placeholder="For example: convert between US dollars, euros and pounds with fixed rates I give you"></textarea>
+            <small>Jarvis drafts the code in the conversation. You read it, pick its tier, and press Create. Nothing is
+              written before that. You can also type <code>/skill</code> and a description in the message box.</small></label>
+          <div class="row"><button class="primary">Draft with Jarvis</button></div>
+        </form>
+        <div id="skills-list"></div>
+        <div class="row"><button id="skills-reload" data-busy="Loading…" title="Load every skill folder again, after you add or edit one">Reload skills</button></div>
+        <details class="more"><summary>Write one by hand</summary>
+          <ol class="howto">
+            <li>Make a folder <code>agent/skills/word_count/</code>. The folder name is the skill's name.</li>
+            <li>Write <code>skill.py</code> with a <code>run(**args)</code> that returns text, a dict or a list.</li>
+            <li>Write <code>manifest.json</code>, as below. At least two examples: tool selection reads them.</li>
+            <li>Press <strong>Reload skills</strong>. A problem shows here, with the reason.</li>
+          </ol>
+          <pre>{
+  "name": "word_count",
+  "description": "Count the words in a piece of text.",
+  "version": "1.0",
+  "tier": "safe",
+  "effects": [],
+  "input_schema": {"type": "object",
+    "properties": {"text": {"type": "string"}},
+    "required": ["text"]},
+  "examples": ["how many words is this", "count the words"],
+  "entry": "skill.py:run"
+}</pre>
+          <p class="hint small-hint">A skill that declares <code>writes</code>, <code>runs_code</code> or
+            <code>network</code> must be <span class="tag confirm">confirm</span> or <span class="tag blocked">blocked</span>.
+            The tier lives in the manifest, which is reviewed like code, so this page shows it but cannot change it.</p>
+        </details>
+      </div>
+    </aside>
+  </section>
+
+  <!-- Under the hood: one section per component, for people who want to see how it works. -->
+  <section class="view" id="view-hood" aria-label="Under the hood">
+    <nav id="tabs" role="tablist" aria-label="Parts of the agent" aria-orientation="vertical">
+      <button role="tab" data-tab="serving"><span class="tab-title">Serving<i class="ping" data-activity="serving"></i></span><span class="tab-sub">Local models</span></button>
+      <button role="tab" data-tab="senses"><span class="tab-title">Senses<i class="ping" data-activity="senses"></i></span><span class="tab-sub">Hear and see</span></button>
+      <button role="tab" data-tab="brain"><span class="tab-title">Brain<i class="ping" data-activity="brain"></i></span><span class="tab-sub">Inside a request</span></button>
+      <button role="tab" data-tab="memory"><span class="tab-title">Memory<i class="ping" data-activity="memory"></i></span><span class="tab-sub">What it recalls</span></button>
+      <button role="tab" data-tab="tools"><span class="tab-title">Tools<i class="ping" data-activity="tools"></i></span><span class="tab-sub">What it can do</span></button>
+      <button role="tab" data-tab="daemon"><span class="tab-title">Always on<i class="ping" data-activity="daemon"></i><i id="daemon-dot" class="dot" title="Daemon"></i></span><span class="tab-sub">Runs on its own</span></button>
+      <button role="tab" data-tab="evolve"><span class="tab-title">Evolve<i class="ping" data-activity="evolve"></i></span><span class="tab-sub">Learns from you</span></button>
+      <button role="tab" data-tab="voice"><span class="tab-title">Voice<i class="ping" data-activity="voice"></i></span><span class="tab-sub">Speaks out loud</span></button>
+      <button class="small detail-switch" role="switch" aria-checked="false" title="Show or hide the extra cards, tables and explanations (key D)">Show details</button>
+    </nav>
+
+    <section id="content">
     <div class="panel" id="panel-serving" role="tabpanel">
       <div class="page-head"><h2>Serving</h2>
         <p>Two local servers do the model work: a language model that reads text, images and audio, and an embedding
           model that powers memory search. Nothing leaves this machine.</p></div>
 
       <div class="card"><h3>How a message moves through the agent</h3>
-        <p class="hint">Each box is a tab. A box lights up while that part of the agent is working.</p>
+        <p class="hint">Each box is a section. A box lights up while that part of the agent is working.</p>
         <ol class="flow">
           <li><button data-go="senses"><b>Senses</b><span>Hears and sees</span><i class="ping" data-activity="senses"></i></button></li>
           <li><button data-go="memory"><b>Memory</b><span>Finds related notes</span><i class="ping" data-activity="memory"></i></button></li>
@@ -67,17 +338,11 @@
 
       <div class="card"><h3>Servers</h3>
         <div id="serving-info" class="servers"></div>
-        <p class="hint">E2B is the smaller model: it uses less memory and replies faster. Switch with the Model menu at the top.
+        <p class="hint">E2B is the smaller model: it uses less memory and replies faster. Switch with the model menu at the top.
           The memory number can drop while a model is idle. That is normal.</p>
         <details class="more detail" id="serving-cmd" hidden><summary>How the servers were started</summary><div id="serving-cmd-body"></div></details>
       </div>
-
-      <div class="card"><h3>Speed test <button id="bench-btn" class="primary small head-action" data-busy="Measuring…">Run benchmark</button></h3>
-        <p class="hint">Sends one fixed prompt to the language model and measures how fast the reply comes back.</p>
-        <div id="bench-latest" class="tiles"></div>
-        <div class="table-wrap detail"><table id="bench-table"><thead><tr><th>Time</th><th>Model</th><th class="num">First token</th>
-          <th class="num">Writing speed</th><th class="num">Reading speed</th><th class="num">Memory</th></tr></thead><tbody></tbody></table></div>
-        <div class="empty-note">No benchmarks yet. Press "Run benchmark".</div></div>
+      <p class="hint keep">The speed test is under <button type="button" class="link" data-go="bench">Benchmarks</button>.</p>
     </div>
 
     <div class="panel" id="panel-senses" role="tabpanel">
@@ -98,14 +363,14 @@
           <figure><figcaption><b>Last screen video</b> <span id="video-info" class="muted"></span></figcaption>
             <div id="last-video" class="media-slot" data-empty="No video yet."></div></figure>
         </div>
-        <p class="hint">A video goes to the model as one input, and llama-server samples it at 1 frame per second. The answer appears in the Tasks tab.</p>
+        <p class="hint">A video goes to the model as one input, and llama-server samples it at 1 frame per second. The answer appears in the "Look at my screen" task.</p>
       </div>
     </div>
 
     <div class="panel" id="panel-brain" role="tabpanel">
       <div class="page-head"><h2>Brain</h2>
         <p>Everything the agent did for one message: what it looked up, how it spent the context, the exact request and the reply.</p></div>
-      <div id="brain-empty" class="card empty-card"><b>Nothing to show yet</b><p>Send a message in the chat, and this page fills in.</p></div>
+      <div id="brain-empty" class="card empty-card"><b>Nothing to show yet</b><p>Send a message on the Agent page, and this section fills in.</p></div>
       <div id="brain-body" hidden>
         <div class="card"><div class="turn-head"><h3>What happened</h3>
             <div class="turn-nav"><button id="turn-prev" class="small" aria-label="Earlier message">‹ Earlier</button>
@@ -162,20 +427,12 @@
       <div class="card"><h3>Recent calls</h3>
         <div class="table-wrap scroll-y"><table id="tool-calls"><thead><tr><th>Time</th><th>Tool</th><th>Arguments</th>
           <th>Status</th><th>Result or reason</th></tr></thead><tbody></tbody></table></div>
-        <div class="empty-note">No tool calls yet. Try asking the chat "What time is it?".</div></div>
-      <div class="card"><h3>MCP servers</h3>
-        <p class="hint">Paste a standard <code>mcpServers</code> config, the same JSON that Claude Desktop, Cursor or VS Code use.
-          A server with <code>command</code> runs on this machine; one with <code>url</code> is remote, and every call to it
-          leaves this machine. API keys stay in environment variables: write <code>"${NAME}"</code> in <code>env</code> or
-          <code>headers</code>. Each tool starts as <span class="tag confirm">confirm</span>, because a server's own hints
-          come from code we do not control.</p>
-        <div id="mcp-servers"></div>
-        <details class="more"><summary>Paste a config</summary>
-          <textarea id="mcp-config" rows="9" spellcheck="false" aria-label="mcpServers config"></textarea>
-          <div class="row"><button id="mcp-save" class="primary" data-busy="Checking…">Use this config</button></div>
-          <pre id="mcp-problems" class="step-bad" hidden></pre>
-        </details>
-      </div>
+        <div class="empty-note">No tool calls yet. Try asking the agent "What time is it?".</div></div>
+      <div class="card"><h3>MCP servers and skills</h3>
+        <p class="hint keep">Set them up on the Agent page, below the tasks:
+          <button type="button" class="link" data-open-task="mcp">MCP servers</button> ·
+          <button type="button" class="link" data-open-task="skills">Skills</button>. Their tools join this registry and
+          pass the same three checks.</p></div>
       <div class="card detail"><h3>Available tools</h3>
         <p class="hint"><span class="tag plain">guarded</span> means an extra check also reads the arguments of each call.</p>
         <div class="table-wrap"><table id="tool-list"><thead class="sr-only"><tr><th>Tool</th><th>Checks</th><th>What it does</th></tr></thead><tbody></tbody></table></div></div>
@@ -234,45 +491,6 @@
         <div id="evolve-feedback"></div></div>
     </div>
 
-    <div class="panel" id="panel-tasks" role="tabpanel">
-      <div class="page-head"><h2>Tasks</h2><p>The jobs this agent is built to do. Everything on the other tabs comes together here.</p></div>
-      <div class="card"><h3>Task 1: voice note to action items</h3>
-        <p class="hint">Speak, stop, and get a transcript with a list of what to do. Both are saved to memory.</p>
-        <div class="row"><button id="rec-btn2" class="primary">Record voice note</button>
-          <label class="file">Upload audio file<input type="file" id="wav-file2" accept="audio/*"></label></div>
-        <div id="task1-out" class="result"></div></div>
-      <div class="card"><h3>Task 2: look at my screen and help</h3>
-        <p class="hint">The agent says what it sees and suggests a fix if something is wrong.</p>
-        <div class="row"><button id="look-btn" class="primary">Capture screen now</button>
-          <button id="watch-btn" data-busy="Recording…">Record 10 s video</button>
-          <span class="row-sep" aria-hidden="true"></span>
-          <label class="file">Upload screenshot<input type="file" id="img-file" accept="image/*"></label>
-          <label class="file">Upload video<input type="file" id="video-file" accept="video/*"></label></div>
-        <p id="hotkey-tip" class="tip" hidden></p>
-        <div id="task2-out" class="result"></div></div>
-      <div class="card"><h3>Task 3: ambient listener with recall</h3>
-        <p class="hint">Turn on always-on listening in the Always on tab, or replay the recorded morning conversation as if it started at 09:00. Then ask about it.</p>
-        <div class="row"><button id="replay-btn" class="primary" data-busy="Replaying…">Replay the morning conversation</button>
-          <label class="field" for="replay-speed">Speed <select id="replay-speed"><option value="0">no waiting</option><option value="4">4× real time</option><option value="1">real time</option></select></label></div>
-        <div id="task3-heard" class="heard"></div>
-        <form id="ask-form" class="row" style="margin-top:10px"><input id="ask-q" aria-label="Question about earlier events" placeholder="What did we decide about the offsite venue this morning?">
-          <button class="primary" data-busy="Thinking…">Ask</button></form>
-        <div id="task3-out" class="result"></div></div>
-      <div class="card"><h3>Task 4: self-improving daily brief</h3>
-        <p class="hint">Writes today's brief from summaries, facts, action items and screen episodes, with the active prompt version. Tell it what to change, then reflect.</p>
-        <div class="row"><button id="brief-btn" class="primary" data-busy="Writing…">Write today's brief</button></div>
-        <div id="task4-out" class="result"></div>
-        <form id="feedback-form" class="row" hidden style="margin-top:10px"><input id="feedback-text" aria-label="Feedback" placeholder="For example: too long, and put the deadlines first">
-          <button type="button" data-rating="1">👍 Good</button><button type="button" data-rating="-1" class="primary">Send feedback</button></form>
-        <div id="task4-reflect" class="result"></div></div>
-      <div class="card"><h3>Task 5: speak up when a test fails</h3>
-        <p class="hint">The agent looks at the screen every few seconds. When the screen changed, Gemma checks it for a failed
-          test run, and a match is spoken, shown as a notification and written to the feed with the reason.</p>
-        <div class="row"><button id="t5-switch" class="mic paused" role="switch" aria-checked="false">Watching off</button>
-          <button id="t5-check" data-busy="Looking…">Check the screen now</button></div>
-        <div id="t5-out" class="result"></div></div>
-    </div>
-
     <div class="panel" id="panel-voice" role="tabpanel">
       <div class="page-head"><h2>Voice</h2>
         <p>The agent speaks with Kokoro, a small text-to-speech model that runs on this machine's CPU. A reply is
@@ -280,25 +498,20 @@
           this tab, because Google Meet shares only the audio of the tab that you present.</p></div>
 
       <div class="card"><h3>Say something</h3>
-        <p class="hint" id="voice-route">Turn on "Voice" at the top to play the sound in this tab. Without it, the agent speaks through this machine's speakers.</p>
+        <p class="hint keep" id="voice-route">Turn on "Voice" at the top to play the sound in this tab. Without it, the agent speaks through this machine's speakers.</p>
         <form id="voice-form" class="row">
-          <input id="voice-text" aria-label="Text to speak" value="Hello, I am Sanjaya. I run on this laptop, and I can speak while I think.">
+          <input id="voice-text" aria-label="Text to speak" value="Hello, I am Jarvis. I run on this laptop, and I can speak while I think.">
           <select id="voice-voice" aria-label="Voice"></select>
           <button class="primary" data-busy="Speaking…">Speak</button>
         </form>
+        <span class="voice-state big" data-state="idle" hidden role="status" aria-live="polite"><span class="vs-anim" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="vs-label"></span></span>
       </div>
 
       <div class="card"><h3>Talk to it</h3>
-        <p class="hint">Say "Hey Sanjaya" and then your request, or press Talk (key T) and speak. Your request and the reply
-          appear in the chat, and the reply is spoken. Saying "Hey Sanjaya" while the agent speaks stops it; without
-          headphones the agent's own voice can drown out the wake word, so the Stop button (key S) is the sure way.</p>
-        <div class="row">
-          <button id="wake-switch" class="mic paused" role="switch" aria-checked="false" title="Listen for the wake word on this machine's microphone">Wake word off</button>
-          <button id="talk-btn" class="primary" title="Start a spoken request now (key T)">Talk</button>
-          <span id="wake-status" class="muted"></span>
-        </div>
-        <span class="voice-state big" data-state="idle" hidden role="status" aria-live="polite"><span class="vs-anim" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="vs-label"></span></span>
-
+        <p class="hint keep">On the <button type="button" class="link" data-go="agent">Agent</button> page, turn on "Wake word" and say
+          "Hey Jarvis", or press Talk (key T) and speak. Your request and the reply appear in the conversation, and the reply
+          is spoken. Saying "Hey Jarvis" while the agent speaks stops it; without headphones the agent's own voice can drown
+          out the wake word, so the Stop button (key S) is the sure way.</p>
       </div>
 
       <div class="card"><h3>Where the time goes</h3>
@@ -315,54 +528,29 @@
           when the microphone hears just any voice, because its own voice from the speakers reaches the microphone too.</p>
       </div>
     </div>
+    </section>
+  </section>
 
-    <div class="panel" id="panel-scorecard" role="tabpanel">
-      <div class="page-head"><h2>Scorecard</h2>
-        <p>Quality checks for each part of the agent, from the last run. Run them with <code>python cli.py evals --run</code>, then press Refresh. Open a row to see its numbers.</p></div>
+  <!-- Benchmarks: how fast and how well it works. -->
+  <section class="view" id="view-bench" aria-label="Benchmarks">
+    <div class="panel active" id="panel-scorecard" role="tabpanel">
+      <div class="page-head"><h2>Benchmarks <button class="small detail-switch head-action" role="switch" aria-checked="false" title="Show or hide the extra cards, tables and explanations (key D)">Show details</button></h2>
+        <p>How fast the local model runs, and how well each part of the agent works. Run the quality checks with
+          <code>python cli.py evals --run</code>, then press Refresh. Open a row to see its numbers.</p></div>
+
+      <div class="card"><h3>Speed test <button id="bench-btn" class="primary small head-action" data-busy="Measuring…">Run benchmark</button></h3>
+        <p class="hint">Sends one fixed prompt to the language model and measures how fast the reply comes back.</p>
+        <div id="bench-latest" class="tiles"></div>
+        <div class="table-wrap detail"><table id="bench-table"><thead><tr><th>Time</th><th>Model</th><th class="num">First token</th>
+          <th class="num">Writing speed</th><th class="num">Reading speed</th><th class="num">Memory</th></tr></thead><tbody></tbody></table></div>
+        <div class="empty-note">No benchmarks yet. Press "Run benchmark".</div></div>
+
       <div id="score-summary" class="card"></div>
-      <div class="card"><h3><span>Results</span><span class="head-action"><button id="score-expand" class="small">Open all</button> <button id="score-refresh" class="small">Refresh</button></span></h3>
+      <div class="card"><h3><span>Scorecard</span><span class="head-action"><button id="score-expand" class="small">Open all</button> <button id="score-refresh" class="small">Refresh</button></span></h3>
         <p class="hint">In each small bar, the blue length is the result and the black tick is the target.</p>
         <div id="score-list"></div></div>
     </div>
   </section>
-
-  <aside id="chat" aria-label="Chat">
-    <div class="chat-head"><h2 id="chat-title">Chat</h2>
-      <button id="chat-history" class="small" aria-expanded="false" aria-controls="chat-sessions" title="Earlier chats, saved on this device">History</button>
-      <button id="chat-new" class="small" disabled title="Start a new chat. This one stays in History. Long-term memories are shared by all chats.">New chat</button></div>
-    <div id="chat-sessions" hidden>
-      <p class="hint">Each chat has its own conversation. All chats share the same long-term memory.</p>
-      <div id="chat-session-list"></div>
-    </div>
-    <div id="chat-empty">
-      <p>Ask anything. Type, speak, paste a picture or share your screen. The agent recalls your memories and can use tools.</p>
-      <div class="suggest">
-        <button type="button" data-suggest="What do I need to do tomorrow?">What do I need to do tomorrow?</button>
-        <button type="button" data-suggest="What did we decide about the offsite this morning?">What did we decide about the offsite this morning?</button>
-        <button type="button" data-suggest="What is wrong on my screen, and how do I fix it?" data-screen="1">Look at my screen: what is wrong?</button>
-        <button type="button" data-suggest="Remember that I have a dentist appointment next Tuesday at 3pm">Remember that I have a dentist appointment…</button>
-      </div>
-      <p class="hint">Paste or drop a picture anywhere in this panel. Press <kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line.</p>
-    </div>
-    <div id="chat-log" aria-live="polite"></div>
-    <div id="chat-approvals" role="alert" hidden></div>
-    <form id="chat-form">
-      <div id="chat-attach" hidden></div>
-      <textarea id="chat-input" rows="1" aria-label="Message" placeholder="Ask anything…" autocomplete="off"></textarea>
-      <div class="composer-bar">
-        <label class="tool-btn" title="Attach a picture (or paste one)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>
-          <span>Picture</span><input type="file" id="chat-file" accept="image/*"></label>
-        <button type="button" id="chat-screen" class="tool-btn" aria-pressed="false" title="Send one screenshot with this message">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
-          <span>Screen</span></button>
-        <button type="button" id="chat-voice" class="tool-btn" aria-pressed="false" title="Speak your message. Press again to stop and send.">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-          <span>Voice</span></button>
-        <button class="primary send" data-busy="Sending…">Send</button>
-      </div>
-    </form>
-  </aside>
 </main>
 
 <div id="drawer">
@@ -380,9 +568,11 @@
 
 <dialog id="lightbox" aria-label="Enlarged image"><img alt=""></dialog>
 <output id="toast"></output>
+<script src="/static/orb.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/always_on.js"></script>
 <script src="/static/voice.js"></script>
 <script src="/static/mcp.js"></script>
+<script src="/static/skills.js"></script>
 </body>
 </html>

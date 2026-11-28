@@ -21,7 +21,7 @@ CONVERSATION = [
     (0, "Morning. Let's sort out the plan for the team offsite before standup."),
     (1, "Sure. I looked at two venues, the lakeside lodge and the city hotel."),
     (0, "The lakeside lodge is cheaper and has the bigger meeting room, so let's book the lakeside lodge."),
-    (1, "Agreed. I'll ask Priya to send the deposit by Wednesday."),
+    (1, "Agreed. I'll ask Emily to send the deposit by Wednesday."),
     (0, "For the date, the fourteenth works better than the twenty first."),
     (1, "Fine, the offsite is on the fourteenth then."),
     (2, "Sorry to jump in. The budget review with Anita moved from Tuesday to Thursday at two."),
@@ -34,7 +34,7 @@ CONVERSATION = [
 QUESTIONS = [
     ("What did we decide about the offsite venue this morning?", [["lakeside"]], False),
     ("When is the offsite?", [["fourteenth", "14"]], False),
-    ("Who is sending the deposit, and by when?", [["priya"], ["wednesday"]], False),
+    ("Who is sending the deposit, and by when?", [["emily"], ["wednesday"]], False),
     ("When is the budget review with Anita now?", [["thursday"], ["two", "2"]], False),
     ("What did we decide about the handouts this morning?", [["pdf"]], False),
     ("Who starts on Monday?", [["marco"]], False),
@@ -48,7 +48,7 @@ LOGS = [
         "id": "workday",
         "rows": [
             ("09:02", "transcript", "Let's book the lakeside lodge for the offsite, it has the bigger room."),
-            ("09:03", "transcript", "Priya will send the deposit for the lodge by Wednesday."),
+            ("09:03", "transcript", "Emily will send the deposit for the lodge by Wednesday."),
             ("09:05", "transcript", "The offsite is on the fourteenth, not the twenty first."),
             ("09:07", "action_item", "Finish the budget slides (due Wednesday evening)"),
             ("09:10", "transcript", "Standup moves to nine thirty every weekday from next week."),
@@ -100,7 +100,7 @@ DAYS = [
         "d1",
         "dev",
         [
-            "(09:00, summary) Picked the lakeside lodge for the offsite on the 14th; Priya sends the deposit.",
+            "(09:00, summary) Picked the lakeside lodge for the offsite on the 14th; Emily sends the deposit.",
             "(09:07, action_item) Finish the budget slides (due Wednesday evening)",
             "(10:40, fact) The budget review with Anita is on Thursday at 2pm.",
             "(11:30, screen_help) Fixed a ModuleNotFoundError for requests with pip install.",
@@ -124,7 +124,7 @@ DAYS = [
         "dev",
         [
             "(09:05, summary) Standup stays at 9am; the 9:30 change was cancelled.",
-            "(10:00, action_item) Send Ravi the demo notes (due tonight)",
+            "(10:00, action_item) Send Mike the demo notes (due tonight)",
             "(11:20, screen_help) Port 8000 was already in use; the server moved to port 8001.",
             "(13:40, fact) The car service is next Tuesday at the Bosch garage.",
             "(16:00, summary) The launch plan covers marketing, hiring and next year's budget.",
@@ -184,7 +184,7 @@ DAYS = [
             "(09:45, action_item) Pay the plumber's invoice (due tomorrow)",
             "(11:00, fact) The book club meets next Tuesday at 7pm.",
             "(14:30, screen_help) All 13 tests passed after the refactor.",
-            "(16:40, action_item) Send the refactor notes to Ravi (due Friday)",
+            "(16:40, action_item) Send the refactor notes to Mike (due Friday)",
         ],
     ),
 ]
@@ -234,7 +234,7 @@ IMAGE_QUERIES = [
 ]
 AUDIO_QUERIES = [
     ("who needs the quarterly report?", 1),
-    ("when does Ravi's demo begin?", 2),
+    ("when does Mike's demo begin?", 2),
     ("what groceries do I need?", 3),
     ("when is the sink being repaired?", 4),
     ("which document do I have to renew?", 5),

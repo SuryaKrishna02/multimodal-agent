@@ -21,7 +21,7 @@ EDGE_LEVEL = 0.02  # fraction of the peak that counts as sound when trimming the
 # Spoken sentences. Numbers are spelled out: a model may write digits, and that is a style choice, not an error.
 SENTENCES = [
     "Please send the quarterly report to John Doe before lunch.",
-    "Ravi said the demo will start at quarter to four.",
+    "Mike said the demo will start at quarter to four.",
     "I need to buy oat milk, eggs and a loaf of bread.",
     "The plumber is coming on Monday morning to fix the kitchen sink.",
     "Remind me to renew my passport before the end of the month.",
@@ -59,10 +59,10 @@ NOTES = [
     ),
     (
         [
-            "Ravi said the demo went well.",
+            "Mike said the demo went well.",
             "I need to send him the notes tonight.",
         ],
-        ["Send Ravi the notes"],
+        ["Send Mike the notes"],
     ),
     (
         [

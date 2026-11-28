@@ -20,7 +20,7 @@ from PIL import Image
 from agent import config, daemon, events, hotkey, mcp_client, serving, tasks, tools
 from agent.memory import episodic
 from agent.senses import audio, video
-from dashboard import always_on, chat, mcp, proactive, voice
+from dashboard import always_on, chat, mcp, proactive, skills, voice
 from evals import common as evals_common
 
 # daemon_starts_models: `cli.py dashboard` started a daemon, and that daemon starts the model servers.
@@ -67,6 +67,7 @@ app.include_router(chat.router)
 app.include_router(voice.router)
 app.include_router(mcp.router)
 app.include_router(proactive.router)
+app.include_router(skills.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

@@ -145,7 +145,7 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("tts", help="a sentence to speak and transcribe back (numbers as digits)")
     p.add_argument("text")
     p.set_defaults(handler=add_tts)
-    p = sub.add_parser("wake", help="a recording and how many times 'Hey Sanjaya' is said in it")
+    p = sub.add_parser("wake", help="a recording and how many times 'Hey Jarvis' is said in it")
     p.add_argument("audio", type=Path)
     p.add_argument("--wakes", type=int, required=True, help="0 for a recording without the phrase")
     p.add_argument("--note", help="where and how it was recorded")

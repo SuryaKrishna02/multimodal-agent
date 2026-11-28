@@ -266,7 +266,7 @@ class Alerts(unittest.TestCase):
 
     def test_due_reminder_is_announced_then_completed(self):
         """Each due reminder becomes an alert, and is marked done after it."""
-        due = [{"id": 7, "text": "call Ravi", "due": "2026-11-28 15:02:00"}]
+        due = [{"id": 7, "text": "call Mike", "due": "2026-11-28 15:02:00"}]
         calls = []
 
         def call(server, tool, args):
@@ -280,7 +280,7 @@ class Alerts(unittest.TestCase):
         ):
             self.assertEqual(proactive.check_reminders(), 1)
         self.assertEqual(calls, ["due_reminders", "complete_reminder"])
-        self.assertEqual(alert.call_args.kwargs["spoken"], "Reminder: call Ravi.")
+        self.assertEqual(alert.call_args.kwargs["spoken"], "Reminder: call Mike.")
 
 
 if __name__ == "__main__":

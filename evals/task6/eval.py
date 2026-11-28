@@ -2,7 +2,7 @@
 
 Cases: data/evals/{synthetic,user}/task6/
     r01.wav    the spoken request, without the wake word (the wake eval measures that part)
-    r01.json   {"text": "Remind me to call Ravi in two minutes.", "mention": "Ravi", "minutes": 2}
+    r01.json   {"text": "Remind me to call Mike in two minutes.", "mention": "Mike", "minutes": 2}
                `mention`: a word the reminder must hold; `minutes`: when it is due, from the start of the turn
 
 Each request takes the real path in a throwaway runtime folder: Whisper (agent/senses/stt.py), then `brain.respond()`

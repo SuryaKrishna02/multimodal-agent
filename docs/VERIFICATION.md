@@ -290,7 +290,8 @@ It got the audio in 1 s steps, as from the live microphone. Whisper took about 0
 3.9 s, because it also loads the model. Whisper made these errors:
 
 - "standoff" for "standup", and "F site" for "offsite"
-- "Kriya" for "Priya": Task 3 then answered "Kriya will send the deposit", and that question failed
+- A misheard name (the person who sends the deposit): Task 3 then answered with the wrong name, and that question
+  failed
 
 The asr eval on the same 10 clips:
 
@@ -715,7 +716,7 @@ Branch `feature/session_3`, from `main` at `de0b96e`. Measured on the M4 (24 GB,
 | Kokoro model | `kokoro-v1.0.int8.onnx` (92.4 MB), `voices-v1.0.bin` (28.2 MB), release `model-files-v1.0` of thewh1teagle/kokoro-onnx | Downloaded and hashed; sizes match the release (it lists no digest) |
 | MCP SDK | `mcp==2.3.0` (official SDK, protocol revisions 2025-11-25 and 2026-07-28) | PyPI JSON, client and server run |
 | Wake-word features | `melspectrogram.onnx`, `embedding_model.onnx`, openWakeWord release v0.5.1 | Downloaded and hashed |
-| Wake-word training | openWakeWord `main` at `368c037` (2025-12-30); data pinned by revision in `scripts/train_wake_word.py` | The Hugging Face files match the sha256 that the Hub lists (LFS oid) |
+| Wake-word classifier | `hey_jarvis_v0.1.onnx` (1.3 MB), the same openWakeWord release (added 2026-11-27, see below) | Downloaded and hashed |
 
 ### Kokoro runs through ONNX, not MLX
 
@@ -729,8 +730,8 @@ Branch `feature/session_3`, from `main` at `de0b96e`. Measured on the M4 (24 GB,
   numbers. int8 is the default.
 - After a few seconds idle, the first sentence takes longer, and more so when it is long (52 characters: 0.35 to
   0.45 s). The first spoken piece is cut at a comma when it is over `TTS_FIRST_CHUNK_CHARS` (60).
-- espeak-ng says "Sanjaya" as "SAN-jay-uh" (`sˈændʒeɪə`). The user says "SUN-juh-yuh", so `config.PRONUNCIATIONS`
-  gives Kokoro the IPA `sˈʌndʒəjə`; every symbol is in Kokoro's vocabulary.
+- `config.PRONUNCIATIONS` gives Kokoro the IPA of a word that espeak-ng says wrong. It held "Sanjaya" (espeak:
+  "SAN-jay-uh") while that was the wake word; it is empty now.
 
 ### Playback
 
@@ -754,63 +755,24 @@ Branch `feature/session_3`, from `main` at `de0b96e`. Measured on the M4 (24 GB,
   give one line, for the small model. An exception inside a tool reaches the client as "Error executing tool X";
   `ToolError` keeps its message, so the model can correct the call.
 - Task 6 with Gemma 4 E4B, typed (no voice yet), reminders tools offered by `tools.select()`: "Remind me to call
-  Ravi in 2 minutes" -> `add_reminder(in_minutes=2, text="Call Ravi")`; "Set a reminder for 16:30 to send the slides"
+  <name> in 2 minutes" -> `add_reminder(in_minutes=2, text="Call <name>")`; "Set a reminder for 16:30 to send the slides"
   -> `add_reminder(at="16:30", ...)`; "What time is it?" -> `get_time`. Each turn took 6 to 10 s: the step after a
   tool result runs with thinking on (the Gemma 4 quirk of Session 1), so it is far over the 2.5 s reply budget.
 - Due reminders: the daemon's watcher calls `due_reminders`, announces each one (feed, notification, speech) and
   then `complete_reminder`. Checked with a stubbed voice and notification; the same reminder is not announced twice.
 
-### Wake word training on the Mac
+### The first wake word, "Hey Sanjaya" (2026-11-24 to 2026-11-26, removed)
 
-openWakeWord's automatic training is written for Linux with a GPU. On the M4 it needed these changes, all in our
-files (`scripts/train_wake_word.py`, `scripts/wakeword/`), none in openWakeWord:
+The first wake word was a custom openWakeWord classifier trained on this Mac (Kokoro clips, near misses, 2,000 h of
+negative features, and 21 of the user's own clips). The trainer and its notes are in Git history at `902fc86`
+(`scripts/train_wake_word.py`, `scripts/wakeword/`, `docs/WAKE_WORD.md`). On 2026-11-27 the user found it unreliable,
+and it was replaced by openWakeWord's pretrained "hey jarvis" model (below). What still holds:
 
-| Problem | Fix |
-| ------- | --- |
-| Clips come from Piper, which upstream supports on Linux only | `scripts/wakeword/generate_samples.py` takes its place: Kokoro with two voices mixed per clip, "Sanjaya" from its IPA; 6 voices held out for the eval |
-| The `full` extra pins `torchaudio<1` and TensorFlow 2.8 | Install openWakeWord with `--no-deps` and pin the packages one by one (`requirements/wakeword-train.txt`) |
-| `acoustics` 0.2.6 imports `scipy.special.sph_harm`, removed in scipy 1.17 | scipy 1.16.3 in the training venv |
-| Near-miss phrases use DeepPhonemizer, whose pickled checkpoint torch >= 2.6 refuses (`weights_only`) | A hand-picked list (`config.WAKE_NEAR_GREETINGS` x `WAKE_NEAR_NAMES`), spoken by Kokoro before train.py runs; it then skips that step |
-| torchaudio 2.11 reads audio only through TorchCodec (FFmpeg) and has no `info()` | `scripts/wakeword/run_train.py` gives train.py soundfile versions of both |
-| Feature pool and DataLoader workers pickle a lambda, which needs Linux's `fork` | One feature process, and DataLoaders without workers |
-| `--convert_to_tflite` defaults to the string "False", which is true | The missing `onnx_tf` after the ONNX file is saved ends the run normally |
-| torch's exporter writes the weights to a second `.onnx.data` file | `export` saves one file |
-| The AudioSet tar of the notebook is gone (now parquet); the FMA loader is a script that `datasets` 5 no longer runs | Two pinned AudioSet parquet files (about 2.8 h of mixed audio), decoded to 16 kHz WAVs |
-
-- Clip speed: about 5 Kokoro clips per second. The full run needs 24,000 clips.
 - Our 3-model streaming code (`agent/voice/wake.py`) gives the same scores as the openwakeword package: largest
-  difference 1.2e-6 over 116 frames.
-- The first trial (1,000 clips, 5,000 steps, negative weight up to 1,500) collapsed: it scores 0.001 on everything,
-  its own training positives included. `auto_train` raises the weight of the negatives from 1 to 1,500 over the run
-  whatever the step count, so a short run never learns the positives. Upstream's quick notebook uses 10,000 steps.
-
-#### The user's own clips decide it (2026-11-24, evening)
-
-The user recorded 40 clips with `cli.py wake record`. 13 were left out by `usable_clips()`: one had no speech, and in
-12 the speech ran to the end of the 2 s recording (the end of the name was cut off). Of the 27 usable clips, 21 went
-into training (trimmed to 0.1 s after the speech) and 6 were kept for testing. Whisper heard most of the user's clips
-as "hey sanjay", one of the near-miss phrases; it did not hurt.
-
-| Model | User's 6 test clips | Held-out Kokoro (12) | macOS voices (8) | False wakes per hour, threshold 0.5 |
-| ----- | ------------------- | -------------------- | ---------------- | ----------------------------------- |
-| Trial, 1,000 clips, 10,000 steps, no user clips | 0 | 8 | 0 | not measured |
-| Trial, same, plus user clips x5 (about 10% of positives) | 6 | 12 | 0 | 6.08 |
-| Full, 10,000 clips, 50,000 steps, user clips x5 (about 1%) | 0 | 12 | 1 | 1.12 |
-| **Full, user clips x50 (about 10%)** | **6** | **12** | **1** | **1.12** (0.28 at threshold 0.9) |
-
-- False wakes are counted on openWakeWord's validation features (10.7 h of speech, music and noise), with the same
-  2 s quiet time after a wake as the live detector.
-- None of the models woke on "Hey Sanjay...", "Hey Sonia...", "Santa came early", "Okay, let us start" or "Sunday with
-  Sonia" (two held-out voices). The last model also stays quiet on "Sanjaya was the narrator..." (the name without
-  "hey"); the trial woke on it.
-- The user's test clips score 0.976 to 0.978 and held-out Kokoro voices 0.987 to 0.989, so `config.WAKE_THRESHOLD` is
-  0.9. That threshold was chosen on the same 6 clips: the wake eval needs new recordings to measure it fairly.
-- The macOS voices (`say`) still wake 1 of 8. They say the name their own way, so they are a hard test of another
-  engine, not of the user's pronunciation.
-- Each full run: 7.9 min of features (one process), 7.4 min of training. The 24,000 Kokoro clips took about 80 min.
-- The model was `.cache/models/wakeword/hey_sanjaya.onnx` (216 KB; now `hey_sanjaya.v1.onnx`, see the echo retraining
-  below). It is not in `agent/pins.py` yet: a pin needs a
-  download URL, and where to host the file (for example a GitHub release) is the user's decision.
+  difference 1.2e-6 over 116 frames. The two feature models did not change.
+- The Sanjaya models: false wakes per hour on openWakeWord's 10.7 h validation features were 1.12 (v1, threshold 0.5),
+  0.28 (v1, 0.9) and 0.65 (`echo2`, the installed one, 0.9). Under the agent's echo the synthetic `echo_miss_rate`
+  was 0.917 (v1) and 0.500 (`echo2`).
 
 ### Session 3 evals, first runs (2026-11-25, E4B, synthetic cases)
 
@@ -820,7 +782,7 @@ The thresholds were set from the approved plan before the first run (`config.THR
 | ---- | ------ | --------- |
 | `tts` | first audio p50 0.35 s, p95 0.45 s; WER 0.038 (10 sentences); real-time factor 0.12 | p95 <= 0.8 s PASS, WER <= 0.10 PASS |
 | `voice_stop` | p95 153 ms; this machine 147 ms (Bluetooth speaker), dashboard tab 62 ms | <= 300 ms PASS |
-| `wake` | missed 1 of 19 (the OS voice); 1 false wake ("Sanjaya was the narrator...") in 4.6 min = 13 per hour | miss <= 0.10 PASS; false wakes per hour <= 0.5 **FAIL** |
+| `wake` ("Hey Sanjaya", since replaced) | missed 1 of 19 (the OS voice); 1 false wake ("Sanjaya was the narrator...") in 4.6 min = 13 per hour | miss <= 0.10 PASS; false wakes per hour <= 0.5 **FAIL** |
 | `proactive` | false alerts 0, missed 0, alert names the test 100% (after the change below) | PASS, PASS |
 | `skills` | fires 100% when it should, 0% when it should not; selection offered the skill 100% | PASS, PASS |
 | `mcp_select` | right tool 85% with 5, 20 and 40 tools all offered; 80% with the top 5 of 40; the right tool was in the top 5 in 95% | top-5 of 40 >= 0.80 PASS |
@@ -829,7 +791,7 @@ The thresholds were set from the approved plan before the first run (`config.THR
 
 - **The wake false-wake rate fails, and we keep the threshold.** One false wake in 4.6 minutes is 13 per hour; the
   word is the name alone, said by one held-out voice. On openWakeWord's 10.7 h validation audio the same model makes
-  0.28 per hour (see above). Both numbers are true; the short synthetic set cannot show a rate under 13 per hour
+  0.28 per hour. Both numbers are true; the short synthetic set cannot show a rate under 13 per hour
   without zero false wakes. An hour of the user's own normal talk (`evals add wake ... --wakes 0`) settles it.
 - **`mcp_select` did not degrade with more tools.** The same three prompts fail at 5, 20 and 40 tools ("what changed
   in my repo", directions, an email draft): the model answered without a tool or chose a near neighbor. The top-5
@@ -847,10 +809,13 @@ The thresholds were set from the approved plan before the first run (`config.THR
 
 ### Barge-in by wake word, live in the dashboard (2026-11-25)
 
+Measured with the "Hey Sanjaya" model; the code changes below still apply. The echo numbers of "Hey Jarvis" are in the
+next section.
+
 The user tried barge-in in the dashboard (Voice in the tab, no headphones): it worked sometimes. The event log showed
 two replies of about a minute (28 and 23 sentences) where "Hey Sanjaya" fired only at the end, or not at all (the
 Stop button ended it). The cause is the agent's own voice in the microphone. The user's 6 held-out clips, with
-Kokoro speech mixed in at a level relative to the user's voice (`scripts/train_wake_word.py usable_clips()`):
+Kokoro speech mixed in at a level relative to the user's voice (the trainer's `usable_clips()`):
 
 | Agent's voice in the mic | Wake scores of the 6 clips |
 | ------------------------ | -------------------------- |
@@ -866,36 +831,8 @@ Kokoro speech mixed in at a level relative to the user's voice (`scripts/train_w
   Stop button and key S always work.
 - With headphones there is no echo, and barge-in by wake word behaves as in the table's first row.
 - Options for speaking over the agent without headphones: retrain the wake model with Kokoro speech mixed in as
-  background (tried, see below), or capture the microphone in the browser with `echoCancellation`, which removes the
+  background (tried: better under echo, more false wakes), or capture the microphone in the browser with `echoCancellation`, which removes the
   tab's own audio before the wake detector hears it (not built).
-
-### Retraining the wake model over the agent's echo (2026-11-25)
-
-`train --echo` adds 500 ten-second Kokoro clips as background (half in `af_heart`, the agent's voice; text from this
-repo's docs without the name or a near miss), counted twice, so half the backgrounds are speech. Both runs reused the
-clips of the full run (`--clips-from full`): 16 min for the echo clips, then 8 min of features and 8 min of training.
-
-Measured on the user's 6 held-out clips with the agent's voice mixed in (sentences that are not in the training
-text), dry and through a random MIT room impulse response, at threshold 0.9; false wakes on openWakeWord's 10.7 h
-validation features with the live detector's 2 s quiet time. The v1 numbers repeat the earlier measurement exactly.
-
-| Model | Dry 10% | Dry 25% | Room 25% | Room 50% | False wakes per hour (0.9) | Synthetic `echo_miss_rate` |
-| ----- | ------- | ------- | -------- | -------- | -------------------------- | -------------------------- |
-| v1 (installed) | 4/6 | 0/6 | 2/6 | 0/6 | **0.28** | 0.917 |
-| `echo`: `--echo` | 5/6 | 0/6 | 2/6 | 1/6 | 0.56 | 0.333 |
-| `echo2`: `--echo --layer-size 64 --rounds 2` | **6/6** | **3/6** | **4 to 6/6** | **2/6** | 0.65 | 0.500 |
-
-- Echo training moves the scores up (v1 at 25%: 0.002 to 0.895; `echo`: 0.068 to 0.954) but not past the threshold
-  for every clip, and at 100% echo no model wakes.
-- False wakes on the validation set rise from 0.28 to 0.65 per hour, above the eval's 0.5 limit. A higher threshold
-  does not buy it back: `echo2` at 0.97 still makes 0.37 per hour and loses part of its gain under echo.
-- The synthetic `false_wakes` is 1 for v1 and `echo2` (the name alone, "Sanjaya was the narrator..."), 0 for `echo`.
-- Six clips are few: "room 25%" for `echo2` was 6/6 with one draw of rooms and 4/6 with another.
-- Decision (2026-11-25): v1 stays installed, and `--echo` is not the default.
-- Changed (2026-11-26): the user chose better barge-in over fewer false wakes, so `echo2` is installed as
-  `hey_sanjaya.onnx` (sha256 `d55ed9ae8aba02f8bef2b7536acb62bbc4176843bd41b3b562050b7c7cadb6ea`). v1 is kept as
-  `hey_sanjaya.v1.onnx` (`6057285d3afa5f9bb16dc8063379a7b8c38fe77cdd4e71c8126f6d34bbf7846c`). A plain `train` still
-  makes the v1 recipe. Expect about one false wake every 1.5 hours of sound; if that is too many, copy v1 back.
 
 ### Spoken replies read markdown aloud (2026-11-25)
 
@@ -906,6 +843,79 @@ written for the dashboard; `voice.chunk` holds what was said. Checked in a test 
 "**Testing** the voice", an emoji and a two-item list were spoken as "Testing the voice.", "one." and "two."
 - `task6` now sends `spoken=True`, as a dashboard voice turn does. Rerun with E4B: success 1.000 (text and time
   1.000), 7.5 s per turn (8.1 s before), so the plain-speech instruction did not hurt the tool call.
+
+### The wake word is now "Hey Jarvis" (2026-11-27)
+
+The user found "Hey Sanjaya" unreliable and chose "Jarvis". openWakeWord ships a pretrained `hey_jarvis` classifier in
+release v0.5.1, beside the two feature models that we already pin, so nothing is trained on this machine.
+
+- `hey_jarvis_v0.1.onnx`: input `x.1` of shape (1, 16, 96), output (1, 1), the same as our classifier, so
+  `agent/voice/wake.py` runs it without a change. sha256 `94a13cfe...0d2cb`, in `agent/pins.py` (group `wake`).
+- Its model card (`docs/models/hey_jarvis.md` upstream): about 200,000 synthetic clips from WaveGlow (LibriTTS) and
+  VITS (VCTK) voices, with noise and room reverb; it warns that "jarvis" alone may also wake it. The release is from
+  2023-09-02, before Kokoro, so the Kokoro voices of the eval are new to it.
+- Kokoro, 7 voices, 0.5 s of room tone on each side: "Hey Jarvis." and "Hey Jarvis, what time is it?" score 0.993
+  to 0.999. "Harvey said the jar is full" scores at most 0.30, "I saw Travis on Sunday" at most 0.12. "Hey Jervis"
+  wakes it (0.89 to 0.998).
+- False wakes on openWakeWord's 10.7 h validation features, live detector (2 s quiet time):
+
+  | Threshold | 0.5 | 0.7 | 0.8 | 0.9 | 0.95 |
+  | --------- | --- | --- | --- | --- | ---- |
+  | False wakes per hour | 0.47 | 0.47 | 0.47 | 0.37 | 0.28 |
+
+  `config.WAKE_THRESHOLD` is 0.5 (openWakeWord's default): a higher one buys little and loses clips said over the
+  agent's echo (some score 0.96).
+- Wake eval, synthetic cases rebuilt with the new phrase and near misses (48 clips, 5.1 min without the phrase):
+
+  | Metric | Result | Threshold |
+  | ------ | ------ | --------- |
+  | `miss_rate` | 0.000 (19 of 19 woke, the OS voice included) | <= 0.10 PASS |
+  | `echo_miss_rate` | 0.333 (4 of 12 missed, all at 50% echo; every 25% clip woke) | none |
+  | `false_wakes` | 2, both "Jarvis was the butler in the old films." (the name alone, scores 0.89 and 0.996) | |
+  | `false_wakes_per_hour` | 23.3 | <= 0.5 **FAIL** |
+
+  No false wake on the ordinary talk, the Task 3 conversation or the agent's voice alone. The failure is the name
+  without "hey", which the model card says can wake it. The eval threshold and the case stay as they are.
+- The example names changed the same day (Ravi to Mike, Priya to Emily, Hyderabad to Chicago, the user's choice), so
+  the synthetic cases were rebuilt and run again on E4B: `cli.py smoke` ALL PASS (Kokoro says "Remind me to call Mike
+  at 4."); `asr` WER 0.044 (Whisper 0.018); `tts` WER 0.038, first audio p95 0.59 s; `task3` accuracy 1.0; `task6`
+  success 1.0 at 8.97 s per turn. The wake numbers above are from this rebuild.
+- Not measured yet: the user's own voice. Check it with `python cli.py wake test`, then add recordings with
+  `python cli.py evals add wake`.
+
+### The user's voice, and the Whisper check (2026-11-27)
+
+The user said "Hey Jarvis" 5 times, about 2 s apart, recorded at once on three microphones (the MacBook Air
+microphone, which is the default input; a Yeti Nano; a C922 webcam). The recordings stayed in a scratch folder and
+were deleted.
+
+- The classifier alone: **0 of 15 woke** at 0.5. Peak scores per phrase: MacBook 0.12, 0.47, 0.15, 0.39, under
+  0.05; Yeti 0.15, 0.17, 0.06, 0.49, 0.11; C922 0.13, 0.43, 0.47, 0.42, 0.14. The level is not the cause: the
+  synthetic positives still score 0.99 to 1.00 at -30 dB. The model learned from synthetic voices only.
+- Whisper (warm, 2 s clips, 0.9 s each) heard "Hey Jarvis" 4 of 5 times and "Hey Cervis" once. Over the whole
+  recording it heard "Hi Jarvis".
+- Second stage added: a score from `WAKE_CHECK_THRESHOLD` (0.1) sends the last `WAKE_CHECK_S` (2 s) to Whisper,
+  0.3 s after the first "maybe" frame, once per phrase. A word with a difflib ratio of `WAKE_NAME_SIMILARITY` (0.7)
+  to "jarvis" or more wakes it. At 0.66 the eval's "Hey Travis" clips woke it 3 times ("Travis" and "Cervis" are
+  both 0.67), so 0.7 it is.
+- The same recordings through the two stages: each phrase alone (quiet time 0.8 s, so the 2 s gaps do not hide one):
+  MacBook 4 of 5, Yeti 3 of 5, C922 3 of 5, **10 of 15** in all. With the live settings (2 s quiet time after a
+  wake) the first phrase woke on every microphone.
+- A wake through the second stage comes about 1.2 s after the phrase ends (0.3 s delay and Whisper), over the 0.3 s
+  `wake` budget. A score of 0.5 or more still wakes at once.
+- Wake eval, synthetic cases (48 clips, 5.1 min without the phrase), before / after:
+
+  | Metric | Classifier only | With the Whisper check | Threshold |
+  | ------ | --------------- | ---------------------- | --------- |
+  | `miss_rate` | 0.000 | 0.000 | <= 0.10 PASS |
+  | `echo_miss_rate` | 0.333 | **0.000** | none |
+  | `false_wakes` | 2 | 2 (the same: "Jarvis was the butler in the old films.") | |
+  | `false_wakes_per_hour` | 23.3 | 23.4 | <= 0.5 **FAIL** (as before) |
+
+- `cli.py smoke`: ALL PASS. Unit tests cover the gate, the name check and the conversation without a model.
+- Conversation mode (a follow-up without the wake word after the reply has played) is checked by unit tests only:
+  the tab's `voice.ended` and this machine's end of playback, the follow-up trigger, and a silent follow-up that ends
+  quietly. Not yet tried with the live microphone.
 
 ## Not verified yet
 

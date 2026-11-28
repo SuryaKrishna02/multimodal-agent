@@ -6,6 +6,7 @@ all day keeps the language model busy. A dedicated speech model (Whisper, throug
 compares the two engines on the same clips.
 """
 
+import threading
 import time
 
 import numpy as np
@@ -13,6 +14,9 @@ import numpy as np
 from agent import accel, config, events
 
 GEMMA_PROMPT = "Transcribe this audio exactly. Output only the transcript."
+# One transcription at a time per process: the wake word's second stage and a spoken request can overlap, and one
+# Whisper model is not known to be safe for two threads at once.
+_LOCK = threading.Lock()
 
 
 def gemma(samples: np.ndarray) -> str:
@@ -44,13 +48,11 @@ def transcribe(samples: np.ndarray, engine: str | None = None) -> str:
         ValueError: If the engine is unknown.
     """
     engine = engine or config.STT_ENGINE
-    t0 = time.time()
-    if engine == "whisper":
-        text = accel.current().transcribe(samples, config.STT_LANGUAGE)
-    elif engine == "gemma":
-        text = gemma(samples)
-    else:
+    if engine not in ("whisper", "gemma"):
         raise ValueError(f"unknown STT engine '{engine}': use 'whisper' or 'gemma'")
+    t0 = time.time()
+    with _LOCK:
+        text = accel.current().transcribe(samples, config.STT_LANGUAGE) if engine == "whisper" else gemma(samples)
     seconds = len(samples) / config.SAMPLE_RATE
     events.emit("senses.stt", engine=engine, audio_s=round(seconds, 1), took_s=round(time.time() - t0, 2), text=text)
     return text

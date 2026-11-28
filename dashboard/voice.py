@@ -4,10 +4,12 @@
     GET  /api/voice/audio/{utt}/{n} one WAV chunk of an utterance
     POST /api/voice/played          the tab started the first chunk (time to first audio)
     POST /api/voice/stopped         the tab went silent after a stop request (stop latency)
+    POST /api/voice/ended           the tab played the last chunk to its end (a conversation listens after it)
     POST /api/voice/stop            the Stop button
     POST /api/voice/say             speak a text (the Voice tab's test box)
-    POST /api/voice/wake            listen for "Hey Sanjaya" (on or off)
+    POST /api/voice/wake            listen for "Hey Jarvis" (on or off)
     POST /api/voice/talk            start a spoken turn now (push to talk; works without a wake model)
+    POST /api/voice/conversation    listen for a follow-up after each reply, without the wake word (on or off)
     GET  /api/voice/state           is a tab listening, the voices, the latency budget, the wake word
 
 The stream reads the event log every `config.VOICE_POLL_S`, so speech that the daemon writes reaches the tab
@@ -27,7 +29,8 @@ from agent.voice import speaker, tts, turn
 from dashboard import chat
 
 router = APIRouter(prefix="/api/voice")
-loop: dict = {"wake": None}  # the running turn.WakeLoop, if any
+# The running turn.WakeLoop, if any, and the conversation switch (a new loop takes it over).
+loop: dict = {"wake": None, "conversation": config.VOICE_FOLLOW_UP_S > 0}
 KEEPALIVE_S = 10.0  # an SSE comment this often, so a quiet stream is not closed by the browser
 
 
@@ -121,6 +124,19 @@ def stopped(body: dict) -> dict:
     )
 
 
+@router.post("/ended")
+def ended(body: dict) -> dict:
+    """Record that the tab played an utterance to its end.
+
+    Args:
+        body (dict): `utt`.
+
+    Returns:
+        dict: The voice.ended event.
+    """
+    return events.emit("voice.ended", utt=str(body["utt"]), route="tab")
+
+
 @router.post("/stop")
 def stop(body: dict | None = None) -> dict:
     """Stop all speech now.
@@ -167,7 +183,7 @@ def _loop(use_wake: bool) -> turn.WakeLoop:
         return current
     if current is not None:
         current.stop()
-    loop["wake"] = turn.WakeLoop(_ask, use_wake=use_wake)
+    loop["wake"] = turn.WakeLoop(_ask, use_wake=use_wake, conversation=loop["conversation"])
     loop["wake"].start()
     return loop["wake"]
 
@@ -183,11 +199,13 @@ def wake(body: dict) -> dict:
         dict: The voice state.
 
     Raises:
-        HTTPException: 409 when the wake-word model is not trained yet.
+        HTTPException: 409 when the wake-word model is not downloaded.
     """
     if body.get("on"):
         if not config.WAKE_MODEL.exists():
-            raise HTTPException(409, f"{config.WAKE_MODEL.name} is not trained yet (docs/WAKE_WORD.md). Use Talk.")
+            raise HTTPException(
+                409, f"{config.WAKE_MODEL.name} is missing: python3 scripts/setup.py --only wake. Use Talk."
+            )
         _loop(use_wake=True)
     elif loop["wake"] is not None:
         loop["wake"].stop()
@@ -213,13 +231,30 @@ def talk() -> dict:
     return {"ok": True}
 
 
+@router.post("/conversation")
+def conversation(body: dict) -> dict:
+    """Turn the conversation on or off: after a reply, listen for a follow-up without the wake word.
+
+    Args:
+        body (dict): `on` (bool).
+
+    Returns:
+        dict: The voice state.
+    """
+    loop["conversation"] = bool(body.get("on"))
+    if loop["wake"] is not None:
+        loop["wake"].conversation = loop["conversation"]
+    events.emit("voice.conversation", on=loop["conversation"])
+    return state()
+
+
 @router.get("/state")
 def state() -> dict:
     """Describe the voice: is a tab listening, which voices exist, and the time budget.
 
     Returns:
         dict: `tab`, `voice`, `voices`, `budget`, `model`, `fade_ms`, `wake` (listening for the wake word),
-            `wake_model` (the model exists) and `error` (None when Kokoro loads).
+            `wake_model` (the model exists), `conversation`, `follow_up_s` and `error` (None when Kokoro loads).
     """
     try:
         names = tts.voices()
@@ -236,5 +271,7 @@ def state() -> dict:
         "fade_ms": config.VOICE_FADE_MS,
         "wake": loop["wake"] is not None and loop["wake"].detector is not None,
         "wake_model": config.WAKE_MODEL.exists(),
+        "conversation": loop["conversation"],
+        "follow_up_s": config.VOICE_FOLLOW_UP_S,
         "error": error,
     }

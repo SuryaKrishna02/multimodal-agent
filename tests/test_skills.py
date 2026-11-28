@@ -12,6 +12,7 @@ from unittest import mock
 
 try:
     from agent import config, skills, tools
+    from dashboard import skills as skills_page
 except ImportError as e:  # bare interpreter without requirements/base.txt
     raise unittest.SkipTest(f"agent dependencies are not installed: {e}") from e
 
@@ -85,6 +86,31 @@ class Manifests(unittest.TestCase):
         """The same effect is fine at tier confirm."""
         manifest = dict(GOOD, effects=["writes"], tier="confirm")
         self.assertEqual(skills.check(manifest, self.skill(manifest)), [])
+
+
+class DashboardView(Manifests):
+    """The Skills pane of the dashboard says, per folder, whether the skill loaded and why not."""
+
+    def test_new_then_loaded(self):
+        """A folder that was never loaded is new; after a load it is loaded, with its tier and examples."""
+        folder = self.skill(GOOD)
+        self.assertEqual(skills_page.folder_view(folder)["state"], "new")
+        skills.load_one(folder)
+        view = skills_page.folder_view(folder)
+        self.assertEqual((view["state"], view["loaded"], view["tier"]), ("loaded", True, "safe"))
+        self.assertEqual(view["examples"], GOOD["examples"])
+
+    def test_refused_shows_the_problem(self):
+        """A manifest problem shows at once; an import error shows after the load that hit it."""
+        folder = self.skill(dict(GOOD, effects=["writes"]))
+        self.assertIn("ground rule 10", " ".join(skills_page.folder_view(folder)["problems"]))
+        (folder / "manifest.json").write_text(json.dumps(GOOD))
+        (folder / "skill.py").write_text("import no_such_module_x\n")
+        skills.load_one(folder)
+        view = skills_page.folder_view(folder)
+        self.assertEqual(view["state"], "refused")
+        self.assertIn("no_such_module_x", " ".join(view["problems"]))
+        self.addCleanup(skills.PROBLEMS.pop, "echo_back", None)
 
 
 class ExampleSkills(unittest.TestCase):

@@ -47,7 +47,7 @@ TOOL_CALLS = [
     ("What is 17 times 23?", "calculator", {"expression": "17"}),
     ("Compute 2 to the power of 10", "calculator", {"expression": "2"}),
     ("Remember that my dentist appointment is on Friday at 3", "save_note", {"text": "dentist"}),
-    ("Note down that Ravi's phone number changed", "save_note", {"text": "Ravi"}),
+    ("Note down that Mike's phone number changed", "save_note", {"text": "Mike"}),
     ("What did I say about John Doe?", "search_memory", {"query": "John Doe"}),
     ("What did I decide about the venue?", "search_memory", {"query": "venue"}),
     ("List the files in my notes folder", "list_files", {"path": "notes"}),
@@ -63,7 +63,7 @@ TOOL_CALLS = [
 # (id, text, kind, junk). The filter drops memories under 3 words and near-copies of stored ones.
 MEMORIES = [
     ("m01", "Dentist appointment moved to Friday at 3pm", "note", False),
-    ("m02", "Ravi's new phone number is in the team spreadsheet", "note", False),
+    ("m02", "Mike's new phone number is in the team spreadsheet", "note", False),
     ("m03", "Decided to hold the offsite at the lakeside venue", "note", False),
     ("m04", "John Doe asked for the slides before lunch on Thursday", "voice_note", False),
     ("m05", "Pay the electricity bill by the end of the month", "note", False),

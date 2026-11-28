@@ -156,7 +156,7 @@ guard keeps them inside the sandbox. The shell guard blocks risky commands.
 | 4 Memory v1 | `agent/memory/episodic.py` | `memory` |
 | 5 Tools, CLI, hotkey | `agent/tools/`, `cli.py`, `agent/hotkey.py` | `tools` |
 | 6 Live tasks | `agent/tasks.py` | `task1`, `task2` (end-to-end) |
-| 7 Scorecard | `evals/run_all.py`, dashboard tab 0 | n/a |
+| 7 Scorecard | `evals/run_all.py`, dashboard view Benchmarks | n/a |
 
 ## Portability layer
 
@@ -270,7 +270,7 @@ flowchart TB
 | ------- | ----- | ------------------------- |
 | 24/7 daemon | `agent/daemon.py`, `agent/checkpoint.py`, `scripts/soak.py`, keep-awake and autostart hooks | `daemon` |
 | Memory consolidation | `agent/memory/consolidate.py`, `agent/memory/episodic.py` | `consolidation`, `multimodal` |
-| Self-evolution | `agent/evolve.py`, dashboard tab 7 (prompt diff view) | `task4` |
+| Self-evolution | `agent/evolve.py`, dashboard: Under the hood, Evolve (prompt diff view) | `task4` |
 | Live tasks | `agent/tasks.py` (`recall`, `daily_brief`), `agent/senses/ambient.py`, `agent/senses/stt.py` | `task3`, `task4`, `asr` (Gemma and Whisper on the same clips) |
 
 ### Data flow for one daemon job
@@ -338,20 +338,22 @@ flowchart TB
 | `agent/voice/tts.py` | Kokoro-82M through kokoro-onnx on the CPU, so the GPU stays free for Gemma. Turns markdown into plain sentences (`speakable`), cuts a reply into sentences (the first one short), and speaks words that espeak gets wrong from IPA (`config.PRONUNCIATIONS`). |
 | `agent/voice/speaker.py` | Writes each sentence to a WAV chunk and sends it where it can be heard: the dashboard tab when one listens (its heartbeat file says so), else the `play_audio` hook. A `voice.stop` event stops speech in every process. The events hold the times that the voice evals read. |
 | `dashboard/voice.py`, `static/voice.js` | A Server-Sent Events stream of the voice events, polled every 50 ms; the tab fetches each chunk and plays it with Web Audio, and reports when the first sound started and when a stop went silent. |
-| `agent/voice/wake.py` | "Hey Sanjaya": openWakeWord's two frozen models plus our classifier, in plain numpy, 80 ms at a time. Trained by `scripts/train_wake_word.py` ([WAKE_WORD.md](WAKE_WORD.md)). |
-| `agent/voice/turn.py` | A spoken turn: the wake word or Talk, record until a pause (the ambient Segmenter), Whisper, the dashboard chat (so approvals work), then speech. A spoken turn asks the model for short plain speech (`brain.SPOKEN`), and `tts.speakable()` removes markdown, symbols and emoji before Kokoro. The dashboard shows the state (waiting for the wake word, listening, thinking after `voice.recorded`, speaking) in the header. The reply is written and spoken in a worker thread while the wake detector keeps listening, so saying the wake word (or Talk) over the agent stops its speech and drops a reply that is still being written, on the tab and on this machine's speakers. |
+| `agent/voice/wake.py` | "Hey Jarvis": openWakeWord's two frozen models plus its pretrained `hey_jarvis` classifier (release v0.5.1, pinned), in plain numpy, 80 ms at a time. Nothing is trained on this machine. Two stages (`Gate`): a score of `WAKE_THRESHOLD` wakes at once; a "maybe" from `WAKE_CHECK_THRESHOLD` sends the last `WAKE_CHECK_S` to Whisper (`said_name`, event `voice.wake_check`), which must hear a word like `WAKE_NAME`. |
+| `agent/voice/turn.py` | A spoken turn: the wake word or Talk, record until a pause (the ambient Segmenter), Whisper, the dashboard chat (so approvals work), then speech. A spoken turn asks the model for short plain speech (`brain.SPOKEN`), and `tts.speakable()` removes markdown, symbols and emoji before Kokoro. The dashboard shows the state (waiting for the wake word, listening, thinking after `voice.recorded`, speaking) in the header. The reply is written and spoken in a worker thread while the wake detector keeps listening, so saying the wake word (or Talk) over the agent stops its speech and drops a reply that is still being written, on the tab and on this machine's speakers. Conversation (the dashboard switch, `VOICE_FOLLOW_UP_S`): once the reply has been heard (`speaker.wait_heard`: the tab posts `/api/voice/ended`, this machine emits `voice.ended`) and `VOICE_ECHO_TAIL_S` later, the next request is recorded without the wake word (trigger "follow-up"). Silence ends it. |
 | `agent/proactive.py` | `alert()`: one key per alert and a cool-down, then the feed, a notification and speech. `check_reminders()` (the daemon calls it every 15 s) and `ScreenWatcher` (Task 5, run by the dashboard). |
-| `agent/skills/` | Native skills: a manifest (description, examples, input schema, tier, effects) checked by a JSON schema, and a Python entry. A skill that writes, runs code or uses the network cannot be `safe`. A skill with a bad manifest or code that fails to import is skipped and reported as `skills.error`; the other skills still load. |
+| `agent/skills/` | Native skills: a manifest (description, examples, input schema, tier, effects) checked by a JSON schema, and a Python entry. A skill that writes, runs code or uses the network cannot be `safe`. A skill with a bad manifest or code that fails to import is skipped and reported as `skills.error` (and kept in `skills.PROBLEMS` for the dashboard); the other skills still load. |
 | `agent/mcp_client.py` | Reads a pasted `mcpServers` config. `command` is on-device, `url` is remote unless it is this machine. Secrets must be `${NAME}` and are read from the environment. Enabled tools join the registry as `<server>__<tool>` at tier `confirm` until the user changes it. One event loop thread keeps a session per server. |
 | `mcp_servers/reminders/server.py` | A tiny MCP server (the official SDK's `MCPServer`) with a SQLite file: add, list, due, complete, cancel. |
-| `dashboard/mcp.py`, `static/mcp.js` | The MCP panel of the Tools tab: paste, labels, connect, tools and tiers. |
+| `dashboard/mcp.py`, `static/mcp.js` | The MCP servers pane of the Agent page, below the tasks: a form (local command with arguments and environment variables, or a remote URL with headers) that builds one `mcpServers` entry and sends the whole config to `POST /api/mcp/config`, which checks it as before; Paste JSON; edit and remove; labels, connect, tools and tiers. The Spoken reminder task (Task 6) reads the same view to check its setup. |
+| `dashboard/skills.py`, `static/skills.js` | The Skills pane of the Agent page: each skill folder with its tier, effects and examples, whether it loaded, and why not (`skills.PROBLEMS` keeps the reason of an import error). Reload loads every folder again without a restart and emits `skills.reloaded`. The page shows a loaded skill's tier but cannot change it: the manifest is reviewed like code. `/skill <description>` in the chat (or the pane's box) asks for a draft and shows it as a card to edit and approve. |
+| `agent/skill_author.py` | Skill authoring. `draft()` asks the local model for a name, description, examples, parameters and the code of `run` (`brain.ask_json` with a schema); nothing is written, and the tier starts at `confirm`. `effects_in()` reads the code's imports and calls and adds the effects it finds, so the effects rule of `agent/skills` applies to what the code does. `build()` takes the input schema from `run`'s signature. `create()` checks the approved draft again, writes the folder and loads it, and removes the folder if the code fails to load. Events: `skills.drafted`, `skills.created`. |
 | `dashboard/proactive.py` | Task 5 on and off, and one check now. |
 
 ### Where each Session 3 segment lives
 
 | Segment | Files | Eval (folder in `evals/`) |
 | ------- | ----- | ------------------------- |
-| Voice | `agent/voice/`, `dashboard/voice.py`, `scripts/train_wake_word.py` | `tts`, `voice_stop`, `wake` |
+| Voice | `agent/voice/`, `dashboard/voice.py` | `tts`, `voice_stop`, `wake` |
 | Proactive output | `agent/proactive.py`, `dashboard/proactive.py` | `proactive` |
 | Native skill interface | `agent/skills/` | `skills` |
 | MCP connectors | `agent/mcp_client.py`, `mcp_servers/reminders/`, `dashboard/mcp.py` | `mcp_select` |
@@ -360,7 +362,8 @@ flowchart TB
 
 ### Data flow for Task 6, a voice-set reminder
 
-1. "Hey Sanjaya" wakes the loop (`wake.Detector.heard()`); any speech that plays stops.
+1. "Hey Jarvis" wakes the loop (`wake.Detector.heard()`, with Whisper checking a "maybe" score); any speech that
+   plays stops. In a conversation, a follow-up within `VOICE_FOLLOW_UP_S` of the last reply needs no wake word.
 2. The request is recorded until a pause and transcribed by Whisper.
 3. The dashboard chat answers it: `tools.select()` offers `reminders__add_reminder` among the top 5, the model calls
    it, `tools.check()` passes it (the user set it to `safe`), and the MCP client sends it to the reminders server.

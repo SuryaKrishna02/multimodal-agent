@@ -2,7 +2,7 @@
 
 Cases: data/evals/{synthetic,user}/mcp_select/
     catalog.jsonl   the tools, one per line: {"name": "weather__forecast", "description": ..., "input_schema": {...}}
-    prompts.jsonl   {"id": "m01", "prompt": "Will it rain in Hyderabad tomorrow?", "tool": "weather__forecast"}
+    prompts.jsonl   {"id": "m01", "prompt": "Will it rain in Chicago tomorrow?", "tool": "weather__forecast"}
 
 For each prompt and each size N (5, 20, 40), the registry holds exactly N catalog tools: the right one plus N - 1
 others in a fixed order per prompt. Then two ways to offer them:

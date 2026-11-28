@@ -159,7 +159,7 @@ function renderFeed() {
   $("#daemon-feed").innerHTML = rows.map((e) => `<div class="feed-row"><time>${clock(e.ts)}</time><div><div>${esc(describe(e))}</div>
     ${e.summary ? `<div class="why">${esc(jobResult(e))}</div>` : ""}</div>
     <span class="tag ${e.status === "failed" || e.kind === "daemon.killed" ? "bad" : e.kind === "daemon.missed" || e.kind.endsWith(".warning") ? "warn" : "plain"}">${esc(e.source || "")}</span></div>`).join("")
-    || '<div class="none">Nothing yet. Start the daemon, or press Summarize now in the Memory tab.</div>';
+    || '<div class="none">Nothing yet. Start the daemon, or press Summarize now in Memory.</div>';
 }
 $("#daemon-start").onclick = (e) => busy(e.target, () => api("/api/daemon/start", {})).then(refreshDaemon);
 $("#daemon-stop").onclick = (e) => busy(e.target, () => api("/api/daemon/stop", {})).then(() => setTimeout(refreshDaemon, 1500));
@@ -236,7 +236,7 @@ async function refreshEvolve() {
     <span>${v.parent ? `<button class="small" data-diff="${v.parent},${v.id}">Diff</button>` : ""}${v.active ? "" : ` <button class="small" data-rollback="${v.id}">Make active</button>`}</span></div>`).join("");
   $("#evolve-feedback").innerHTML = s.feedback.map((f) => `<div class="feed-row"><time>${clock(f.ts)}</time><div>${f.rating > 0 ? "👍" : "👎"} ${esc(f.text)}
     <div class="why">${f.brief_id ? `brief #${f.brief_id} · ` : ""}${f.used_in ? `used in v${f.used_in}` : "not used yet"}</div></div><span class="tag ${f.source === "user" ? "safe" : "plain"}">${esc(f.source)}</span></div>`).join("")
-    || '<div class="none">No feedback yet. Write a brief in the Tasks tab and tell it what to change.</div>';
+    || '<div class="none">No feedback yet. Run the "Daily brief" task on the Agent page and tell it what to change.</div>';
   renderRefused();
 }
 // Only what a reflection here or in the daemon refused: the Task 4 eval writes refusals to the same log.

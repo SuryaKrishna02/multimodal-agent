@@ -146,9 +146,9 @@ TTS_MAX_CHUNK_CHARS = 160  # a sentence longer than this is cut at a comma
 # The first piece is cut shorter, because the time to first audio grows with its length (M4, after a few seconds idle:
 # 20 characters 0.21 s, 52 characters 0.35 to 0.45 s).
 TTS_FIRST_CHUNK_CHARS = 60
-# Words that espeak-ng says wrong, as IPA for Kokoro. espeak reads "Sanjaya" as "SAN-jay-uh"; the user says
-# "SUN-juh-yuh".
-PRONUNCIATIONS = {"sanjaya": "sˈʌndʒəjə"}
+# Words that espeak-ng says wrong, as IPA for Kokoro, for example {"word": "wˈɜːd"}. None for now: espeak says
+# "Jarvis" right.
+PRONUNCIATIONS: dict[str, str] = {}
 VOICE_DIR = RUNTIME / "voice"  # one folder of WAV chunks per utterance; the dashboard tab fetches them from here
 VOICE_KEEP = 40  # utterance folders kept; older ones are deleted
 VOICE_TAB_FILE = RUNTIME / "voice_tab.json"  # the dashboard tab that plays audio writes its heartbeat here
@@ -167,40 +167,34 @@ LATENCY_BUDGET = {
 }
 
 # --- Wake word (Session 3) ---------------------------------------------------
-# "Hey Sanjaya": a custom openWakeWord model, trained by scripts/train_wake_word.py on Kokoro clips (docs/WAKE_WORD.md).
-WAKE_PHRASE = "hey sanjaya"
+# "Hey Jarvis": openWakeWord's pretrained classifier (release v0.5.1, pinned in agent/pins.py, group `wake`). Upstream
+# trained it on about 200,000 synthetic clips (WaveGlow and VITS voices, its model card), so nothing is trained here.
 WAKE_DIR = MODELS / "wakeword"
-WAKE_MODEL = WAKE_DIR / "hey_sanjaya.onnx"  # the trained classifier; the two frozen feature models sit beside it
-# Score per 80 ms frame that counts as a wake. openWakeWord's default is 0.5. Chosen on 2026-11-24 for the model trained
-# with 21 of the user's clips: at 0.9 its 6 held-out user clips (scores 0.976-0.978) still wake, and false wakes on
-# the 10.7 h validation set drop from 1.12 to 0.28 per hour. Check it again with new recordings (the wake eval).
-WAKE_THRESHOLD = 0.9
-WAKE_REFRACTORY_S = 2.0  # after a wake, ignore the phrase for this long, so one "Hey Sanjaya" wakes once
+WAKE_MODEL = WAKE_DIR / "hey_jarvis_v0.1.onnx"  # the classifier; the two frozen feature models sit beside it
+# Score per 80 ms frame that counts as a wake. openWakeWord's default is 0.5. Check it with the wake eval, and with your
+# own recordings (`python cli.py evals add wake`), before you change it.
+WAKE_THRESHOLD = 0.5
+WAKE_REFRACTORY_S = 2.0  # after a wake, ignore the phrase for this long, so one "Hey Jarvis" wakes once
+# Second stage. A score from WAKE_CHECK_THRESHOLD up to WAKE_THRESHOLD is a "maybe": Whisper reads the last
+# WAKE_CHECK_S of audio, and a heard word close to WAKE_NAME makes it a wake. The model was trained on synthetic voices
+# only: on 2026-11-27 the user's own "Hey Jarvis" peaked at 0.12 to 0.49 (5 phrases, 3 mics, none woke at 0.5), and
+# Whisper heard "Jarvis" in 4 of 5. None = the model alone decides.
+WAKE_CHECK_THRESHOLD: float | None = 0.1
+WAKE_CHECK_DELAY_S = 0.3  # wait this long after the first "maybe" frame, so the audio holds the end of the phrase
+WAKE_CHECK_S = 2.0  # seconds of audio that Whisper reads (the phrase takes about 0.8 s)
+WAKE_NAME = "jarvis"
+# difflib ratio of a heard word to WAKE_NAME that counts: "Javis" 0.91, "Jervis" and "Jarvas" 0.83 count. "Travis" and
+# "Cervis" (Whisper, once in the user's 5 clips) are both 0.67: at 0.66 the eval's "Hey Travis" clips woke it 3 times.
+WAKE_NAME_SIMILARITY = 0.7
 VOICE_REQUEST_WAIT_S = 5.0  # after a wake, give up if no speech starts within this time
+# Conversation: after the reply has played, listen this long for a follow-up request without the wake word.
+# 0 turns it off. The dashboard's "Conversation" switch turns it off and on while it runs.
+VOICE_FOLLOW_UP_S = 8.0
+VOICE_ECHO_TAIL_S = 0.5  # after the reply ends, wait this long before listening: speaker delay and room echo
 VOICE_REQUEST_MAX_S = 15.0  # a spoken request ends here even without a pause
-WAKE_TRAIN_DIR = CACHE / "wakeword-train"  # the training venv, the downloaded data and the clips (about 25 GB)
-# Kokoro voices that never make a training clip. The wake eval speaks the phrase with them (and with the OS voices),
-# so it measures speakers that the model has never heard.
-WAKE_HELD_OUT_VOICES = ("af_nicole", "am_puck", "bf_lily", "bm_lewis", "hf_beta", "am_echo")
-# Near misses, spoken as negative training clips: each greeting with each name, except the phrase itself. Left out on
-# purpose: "hay" and "they" (they sound like "hey") and "Sandhya" (said almost like SUN-juh-yuh).
-# Your own "Hey Sanjaya" clips (`python cli.py wake record`), git-ignored. Training copies each one WAKE_USER_REPEAT
-# times into the positive clips; augmentation gives every copy a different room and noise. Measured 2026-11-24 with
-# 21 clips: at 5 copies (1% of the 10,000 Kokoro positives) the full model ignored the user's voice.
-WAKE_USER_CLIPS = ROOT / "data" / "wakeword" / "user"
-WAKE_USER_REPEAT = 50
-WAKE_USER_TEST_EVERY = 4  # every 4th usable recording is kept out of training, to test the model on your voice
-WAKE_NEAR_GREETINGS = ("hey", "say", "okay", "hi", "hello", "")
-WAKE_NEAR_NAMES = ("sanjaya", "sanjay", "sonia", "sonya", "sunny", "santa", "sunday", "anya", "ninja", "sangria", "")
-# Echo: without headphones the microphone also hears the agent, and the first model missed "Hey Sanjaya" when the
-# agent's voice was even 25% as loud as the user's (docs/VERIFICATION.md, barge-in). Training mixes these clips of
-# Kokoro speech in as background, next to the AudioSet clips (`train --echo`), so the model learns the phrase over the
-# agent's voice. Measured 2026-11-25: it helps under echo but doubles false wakes. The installed model is the echo2
-# run (2026-11-26, the user's choice); a plain `train` still makes the model without echo.
-WAKE_ECHO_CLIPS = 500  # about 10 s each; each counts WAKE_ECHO_DUPLICATION times, so half the backgrounds are speech
-WAKE_ECHO_DUPLICATION = 2  # the 1,000 AudioSet clips count once
-WAKE_ECHO_SECONDS = 10.0
-WAKE_ECHO_OTHER_VOICES = ("af_bella", "af_sarah", "am_michael", "bf_emma", "bm_george")  # none of them held out
+# Kokoro voices that say the phrase in the synthetic wake eval (and the OS voices). Kokoro came out after the model
+# (2023), so every Kokoro voice is new to it.
+WAKE_EVAL_VOICES = ("af_nicole", "am_puck", "bf_lily", "bm_lewis", "hf_beta", "am_echo")
 
 # --- MCP and native skills (Session 3) ----------------------------------------
 MCP_CONFIG = RUNTIME / "mcp.json"  # the pasted mcpServers config, the enabled tools and their tiers (git-ignored)

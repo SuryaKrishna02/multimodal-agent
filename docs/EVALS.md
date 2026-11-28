@@ -86,8 +86,8 @@ each wrong answer the first stage that lost the information, checked by code aga
 | `answer` | the reply, though the model read it (or it invented an answer to an unanswerable question) | the recall prompt (`tasks.recall`) |
 
 The scorecard counts them as `lost_hearing`, `lost_retrieval` and `lost_answer`. For example, in one E4B run Whisper
-heard "Priya" as "Kriya". The answer "Kriya will send the deposit" was wrong, and the record says `hearing`: a better
-recall prompt cannot fix that. Open `evals/results/<tier>/task3.json` to read the transcripts and the memories next
+misheard the name of the person who sends the deposit. The answer named the wrong person, and the record says
+`hearing`: a better recall prompt cannot fix that. Open `evals/results/<tier>/task3.json` to read the transcripts and the memories next
 to each answer.
 
 **A short soak proves the script, not the daemon.** Memory growth is a straight-line fit after a 5-minute warm-up, so
@@ -152,7 +152,7 @@ Gemma 4, the same model family that wrote the text. A judge can miss what the wr
 |---|---|---|---|
 | `tts` | component | Time until Kokoro has the first spoken piece (median and 95th percentile), word error rate after a round trip through Whisper, real-time factor | the real `tts.sentences()` and `tts.synthesize()`; numbers are written as digits in the cases, as Whisper writes them |
 | `voice_stop` | component | Stop latency: stop request to silence | built in code: near-silent playback through the `play_audio` hook, stopped at a random moment, plus every stop that a dashboard tab reported |
-| `wake` | component | Missed wakes, false wakes, false wakes per hour of audio without the phrase; `echo_miss_rate` (no threshold): missed wakes when the phrase is said over the agent's own voice | each recording streams through the live detector. Synthetic clips use voices that never made a training clip; the echo clips mix the phrase over the agent's voice (`config.TTS_VOICE`) at 25% and 50% |
+| `wake` | component | Missed wakes, false wakes, false wakes per hour of audio without the phrase; `echo_miss_rate` (no threshold): missed wakes when the phrase is said over the agent's own voice | each recording streams through the live detector, Whisper's check of a "maybe" score included (so the eval needs the Whisper weights). Synthetic clips use voices that never made a training clip; the echo clips mix the phrase over the agent's voice (`config.TTS_VOICE`) at 25% and 50% |
 | `proactive` | component | False alerts (spoke up when nothing was wrong), missed alerts, alerts that name the failing test | rendered screens: failed test runs in four tools, and hard negatives such as an import error, code that mentions tests, passing runs |
 | `skills` | component | A skill fires when it should and stays quiet when it should not, and tool selection offered it | prompts that are not the manifests' own examples, through `tools.select()` and one model step |
 | `mcp_select` | component | The right tool among 5, 20 and 40, with all of them in the request or only the top 5 that `tools.select()` picks | a made-up 40-tool catalog in the style of common MCP servers |
@@ -168,14 +168,14 @@ Gemma 4, the same model family that wrote the text. A judge can miss what the wr
   shows the gap between speech engines, not a miss on your voice.
 - `mcp_select.acc_40` is expected to drop: the point is the comparison with `sel_acc_40`, where the agent offers only
   the 5 tools that match the request.
-- `tts.first_audio_*` stops at Kokoro. The tab adds about 0.1 to 0.5 s; the Voice tab of the dashboard shows the time
+- `tts.first_audio_*` stops at Kokoro. The tab adds about 0.1 to 0.5 s; the Voice section of the dashboard (under the hood) shows the time
   until the tab actually played.
 
 ### What to record for Session 3
 
-- **Wake word, the most important:** 20 to 40 new clips of "Hey Sanjaya" (not the clips you trained with) in the
-  rooms and at the distances where you use it, each with `--wakes 1`. Then one long recording of normal talk, a
-  meeting or a video call without the phrase, with `--wakes 0`: that is the false-wake rate that matters.
+- **Wake word, the most important:** 20 to 40 clips of "Hey Jarvis" in the rooms and at the distances where you use
+  it, each with `--wakes 1`. Then one long recording of normal talk, a meeting or a video call without the phrase,
+  with `--wakes 0`: that is the false-wake rate that matters.
 - **Task 6:** 3 to 5 spoken reminder requests in your own voice, with what the reminder must hold and when.
 - **Proactive and Task 5:** screenshots of your own terminal or editor: a failing test run (`--alert`) and things
   that are not one (an error that is not a test, a passing run).
