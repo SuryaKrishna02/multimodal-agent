@@ -590,6 +590,19 @@ body.flow .next-cards.three { grid-template-columns: 1fr; }
 #s-p1more .card > span, #s-p2more .card > span { font-size: 25px; }
 #s-p1more .cards, #s-p2more .cards { flex: 1; grid-auto-rows: 1fr; }
 #s-p1more .stat b, #s-p2more .stat b { font-size: 48px; }
+/* Voice walk: the re.split example under the code */
+#s-tts-walk .split-ex { border: 1px solid var(--line); border-radius: 10px; padding: 6px 16px 8px; background: var(--surface); }
+#s-tts-walk .split-ex p { max-width: none; }
+#s-tts-walk .split-h { margin: 0 0 2px; font-size: 19px; font-weight: 600; }
+#s-tts-walk .split-ex table.t { font-size: 18px; line-height: 1.25; }
+#s-tts-walk .split-ex table.t th { font-size: 17px; width: 6.5em; padding: 2px 10px; border-bottom: 1px solid var(--line); }
+#s-tts-walk .split-ex table.t td { padding: 2px 10px; }
+#s-tts-walk .split-ex table.t td.n { text-align: left; }
+#s-tts-walk .split-ex code { font-size: 17px; }
+#s-tts-walk .split-note { margin: 4px 0 0; font-size: 18px; line-height: 1.3; }
+/* Jargon tooltips: sims.js places one element inside the slide. The flow layout keeps the template's ::after. */
+body.tips-js:not(.flow) .term::after { display: none; }
+.slide > #term-tip { position: absolute; z-index: 20; width: max-content; max-width: 560px; padding: 14px 18px; border-radius: 6px; background: var(--ink); color: var(--bg); font-size: 22px; line-height: 1.4; font-weight: 400; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -789,13 +802,13 @@ if local and not local.play(path):
   </div>
   <ul class="points row3 sim-points"><li class="point"><b>Markdown is for the screen</b><span>espeak reads every symbol out loud. A spoken turn also asks Gemma for one to three plain sentences.</span></li><li class="point"><b>A short first piece</b><span>The time to the first sound grows with its length: 20 characters 0.21 s, 52 characters up to 0.45 s.</span></li><li class="point"><b>Words that espeak says wrong</b><span><code>config.PRONUNCIATIONS</code> gives Kokoro the <span class="term" tabindex="0" data-def="The International Phonetic Alphabet: one symbol for each speech sound.">IPA</span> of such a word. It is empty: espeak says &ldquo;Jarvis&rdquo; right.</span></li></ul>
 </section>
-<section class="slide" data-type="content" data-part="voice" data-title="Voice: text to sound">
+<section class="slide" data-type="content" data-part="voice" data-title="Voice: text to sound" id="s-tts-walk">
   <h2>Voice: Kokoro turns phonemes into sound</h2>
   <p class="rel"><b>Called by</b> <code>speaker.speak()</code>, for each piece of a reply <b>Calls</b> <code>tokenizer.phonemize()</code> (espeak-ng), <code>Kokoro.create()</code></p>
   <div class="walk" style="grid-template-columns:1.3fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/voice/tts.py  phonemes() and synthesize()</div><pre class="code" data-blocks='[[141, 144, 0], [145, 149, 1], [163, 163, 2], [164, 170, 3]]' data-src="agent/voice/tts.py:141-149,163-170">words = "|".join(re.escape(w) for w in config.PRONUNCIATIONS)
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/voice/tts.py  phonemes() and synthesize()</div><pre class="code" data-blocks='[[141, 144, 0], [145, 149, 1], [163, 163, 2], [164, 170, 3]]' data-src="agent/voice/tts.py:141-142,144-149,163-170">words = "|".join(re.escape(w) for w in config.PRONUNCIATIONS)
 out = []
-# With a group in the pattern, re.split keeps each matched word at the odd positions.
+...
 for i, part in enumerate(re.split(rf"\b({words})\b", text, flags=re.IGNORECASE)):
     if i % 2:
         out.append(config.PRONUNCIATIONS[part.lower()])
@@ -810,8 +823,16 @@ with _lock:
         speed=config.TTS_SPEED,
         lang=config.TTS_LANG,
         is_phonemes=True,
-    )</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Find the listed words</b><span class="txt"><code>re.split</code> cuts the piece at each word of <code>config.PRONUNCIATIONS</code>. The list is empty now.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>IPA or espeak</b><span class="txt">A listed word goes in as its IPA. <span class="term" tabindex="0" data-def="An open program that turns written words into phonemes, with rules and a dictionary.">espeak-ng</span> turns the other words into <span class="term" tabindex="0" data-def="The sounds of speech, written as symbols. Kokoro reads these, not letters.">phonemes</span>, in US English.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One at a time</b><span class="txt">Two syntheses at the same time only share the same CPU cores. A lock lets one run.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Phonemes to a waveform</b><span class="txt">Kokoro reads the phonemes and one voice: <code>am_michael</code>, of 54. It gives float32 audio, 24,000 samples per second.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Gemma 4 takes audio in, but it writes only text. So speech needs a second model. Kokoro runs on the CPU, and the GPU stays free for Gemma.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>10 synthetic sentences, voice <code>am_michael</code>, warm.</dd><dt>Output</dt><dd>The time to write each piece, and the length of its audio.</dd><dt>Metrics</dt><dd>1 s of speech in 0.12 s on the CPU, with the 92 MB int8 file.</dd></dl></li></ol>
+    )</pre></div><div class="split-ex">
+      <p class="split-h">Example: if &ldquo;Gemma&rdquo; is in the list, <code>re.split</code> cuts &ldquo;Ask Gemma now&rdquo; into:</p>
+      <table class="t">
+        <tr><th><code>i</code></th><td class="n">0</td><td class="n"><b>1</b></td><td class="n">2</td></tr>
+        <tr><th><code>part</code></th><td><code>"Ask "</code></td><td><code>"Gemma"</code></td><td><code>" now"</code></td></tr>
+        <tr><th>Goes to</th><td>espeak-ng</td><td><b>its IPA</b></td><td>espeak-ng</td></tr>
+      </table>
+      <p class="split-note">The parentheses keep each matched word, so a listed word is always at an odd <code>i</code>.</p>
+    </div></div>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Find the listed words</b><span class="txt"><code>re.split</code> cuts the piece at each word of <code>config.PRONUNCIATIONS</code>. The list is empty now.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>IPA or espeak</b><span class="txt">Odd <code>i</code>: a listed word, as its IPA. Even <code>i</code>: <span class="term" tabindex="0" data-def="An open program that turns written words into phonemes, with rules and a dictionary.">espeak-ng</span> turns the text into <span class="term" tabindex="0" data-def="The sounds of speech, written as symbols. Kokoro reads these, not letters.">phonemes</span>.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One at a time</b><span class="txt">Two syntheses at the same time only share the same CPU cores. A lock lets one run.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Phonemes to a waveform</b><span class="txt">Kokoro reads the phonemes and one voice: <code>am_michael</code>, of 54. It gives float32 audio, 24,000 samples per second.</span></li><li class="walk-note lesson"><b>Lesson</b><span class="txt">Gemma 4 takes audio in, but it writes only text. So speech needs a second model. Kokoro runs on the CPU, and the GPU stays free for Gemma.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>10 synthetic sentences, voice <code>am_michael</code>, warm.</dd><dt>Output</dt><dd>The time to write each piece, and the length of its audio.</dd><dt>Metrics</dt><dd>1 s of speech in 0.12 s on the CPU, with the 92 MB int8 file.</dd></dl></li></ol>
   </div>
 </section>
 <section class="slide" data-type="content" data-part="voice" data-title="Voice: to the tab">
@@ -1692,6 +1713,43 @@ const SIM = {
         e.message.split('\n').map(x => `<li class="bad"><code>${SIM.esc(x)}</code></li>`).join('');
     }
   }, 'rem');
+})();
+
+/* ---------- Jargon tooltips: keep each one inside the slide ---------- */
+// The template draws a .term tooltip with ::after, from the left of the word down. Near the right or the bottom
+// of the slide, the slide cuts it off. In slide mode, one element replaces it, placed inside the 1920 by 1080
+// slide. The flow layout (narrow screens) keeps the template's ::after.
+(function () {
+  const PAD = 24, GAP = 10; // slide pixels: the space to the slide edge, and between the word and the tooltip
+  const tip = document.createElement('div');
+  tip.id = 'term-tip';
+  tip.setAttribute('role', 'tooltip');
+  document.body.classList.add('tips-js');
+  let on = null;
+  function hide() { if (on) { tip.remove(); on = null; } }
+  function show(t) {
+    const slide = t.closest('.slide');
+    if (!slide || document.body.classList.contains('flow')) return;
+    on = t;
+    tip.textContent = t.dataset.def;
+    slide.appendChild(tip);
+    // Client rects are scaled with the deck; offset sizes are in slide pixels.
+    const box = slide.getBoundingClientRect(), s = box.width / slide.offsetWidth;
+    const parts = t.getClientRects(), first = parts[0], last = parts[parts.length - 1];
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let y = (last.bottom - box.top) / s + GAP;
+    if (y + h > slide.offsetHeight - PAD) y = (first.top - box.top) / s - GAP - h; // no room below: put it above
+    const x = (first.left - box.left) / s;
+    tip.style.left = Math.max(PAD, Math.min(x, slide.offsetWidth - PAD - w)) + 'px';
+    tip.style.top = Math.max(PAD, y) + 'px';
+  }
+  const termOf = e => (e.target.closest ? e.target.closest('.term') : null);
+  document.addEventListener('mouseover', e => { const t = termOf(e); if (t && t !== on) show(t); else if (!t) hide(); });
+  document.addEventListener('focusin', e => { const t = termOf(e); if (t) show(t); });
+  document.addEventListener('focusout', hide);
+  document.addEventListener('keydown', e => { if (e.key !== 'Tab') hide(); });
+  window.addEventListener('hashchange', hide);
+  window.addEventListener('resize', hide);
 })();
 </script>
 </body>
