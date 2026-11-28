@@ -100,12 +100,14 @@ the other cards, the tables, the explanations and the metrics that have no targe
 
 The message box takes text, a picture, your screen or your voice:
 
-- **Picture**: pick a file, paste one (Cmd+V / Ctrl+V), or drop one on the conversation. It goes to Gemma 4 as an image.
-- **Screen**: one screenshot goes with the next message, then the switch turns itself off.
-- **Dictate**: press Dictate, speak, press it again. The dashboard records with the same microphone code as Task 1,
-  keeps only the speech (Silero VAD) and turns it into text with `config.STT_ENGINE` (Whisper; Gemma when your
-  accelerator has no Whisper). The text is sent as your message, and the bubble says which engine heard it. The Mic
-  switch at the top still wins.
+- **Attach** opens a small menu:
+  - **Picture from a file**: pick a file. You can also paste one (Cmd+V / Ctrl+V) or drop one on the conversation. It
+    goes to Gemma 4 as an image.
+  - **Screenshot of my screen**: one screenshot goes with the next message, then the switch turns itself off.
+- **Dictate**: press Dictate, speak, press Stop. The dashboard records with the same microphone code as Task 1, keeps
+  only the speech (Silero VAD) and turns it into text with `config.STT_ENGINE` (Whisper; Gemma when your accelerator
+  has no Whisper). The text goes into the message box, so you can edit it before you send. The bubble says which
+  engine heard it. The Mic switch at the top still wins.
 - **Talk** (key T): a spoken turn. The agent records until you pause, answers in the conversation and speaks the reply.
   "Wake word" above the conversation does the same when you say "Hey Jarvis".
 - **Conversation** (on by default): after a reply has played, just keep talking. The header says "Your turn…" and the

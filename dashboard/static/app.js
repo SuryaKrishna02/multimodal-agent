@@ -52,7 +52,7 @@ function working(el, text) {
 // `out` is a result element that shows a spinner line until the request ends.
 async function busy(control, fn, { out, text } = {}) {
   const isButton = control.tagName === "BUTTON";
-  const label = control.textContent;
+  const label = control.innerHTML;   // the whole content, so an icon and its <span> come back too
   control.disabled = true;
   control.classList.add("is-busy");
   if (isButton) control.textContent = control.dataset.busy || "Working…";
@@ -71,7 +71,7 @@ async function busy(control, fn, { out, text } = {}) {
   } finally {
     control.disabled = false;
     control.classList.remove("is-busy");
-    if (isButton) control.textContent = label;
+    if (isButton) control.innerHTML = label;
   }
 }
 
@@ -752,7 +752,8 @@ function noteChatStep(ev) {
 }
 
 // The composer: a picture (picked, pasted or dropped), one screenshot, or your voice, next to the text.
-const composer = { image: null, screen: false };
+// `voice` holds the transcript details while dictated text waits in the box.
+const composer = { image: null, screen: false, voice: null };
 const input = $("#chat-input");
 const growInput = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; };
 input.addEventListener("input", growInput);
@@ -799,8 +800,13 @@ function attachFile(file) {
   reader.onload = () => { composer.image = reader.result; renderAttach(); input.focus(); };
   reader.readAsDataURL(file);
 }
-$("#chat-file").onchange = (e) => { attachFile(e.target.files[0]); e.target.value = ""; };
-$("#chat-screen").onclick = () => { composer.screen = !composer.screen; renderAttach(); };
+// Attach: one button opens a small menu with a picture file and a screenshot.
+const setAttachOpen = (open) => { $("#attach-pop").hidden = !open; $("#attach-btn").setAttribute("aria-expanded", String(open)); };
+$("#attach-btn").onclick = () => setAttachOpen($("#attach-pop").hidden);
+document.addEventListener("click", (e) => { if (!e.target.closest(".attach-menu")) setAttachOpen(false); });
+$(".attach-menu").addEventListener("keydown", (e) => { if (e.key === "Escape") { setAttachOpen(false); $("#attach-btn").focus(); } });
+$("#chat-file").onchange = (e) => { attachFile(e.target.files[0]); e.target.value = ""; setAttachOpen(false); };
+$("#chat-screen").onclick = () => { composer.screen = !composer.screen; renderAttach(); setAttachOpen(false); input.focus(); };
 $("#chat-attach").onclick = (e) => {
   const b = e.target.closest("[data-unattach]");
   if (b) { composer[b.dataset.unattach] = b.dataset.unattach === "screen" ? false : null; renderAttach(); }
@@ -822,8 +828,10 @@ document.addEventListener("click", (e) => {   // delegated: skill examples are d
   input.focus();
 });
 
-async function sendChat(text, voice = null) {
-  if (!voice && runSlash(text)) return;
+async function sendChat(text) {
+  const voice = composer.voice;   // set when Dictate wrote the text
+  composer.voice = null;
+  if (runSlash(text)) return;
   if (appState && !appState.llm) { toast("The language model is not ready yet. The model menu at the top shows its state.", "error"); return; }
   const body = { text, with_screen: composer.screen, image: composer.image, voice };
   if (!text && !body.image && !body.with_screen) return;
@@ -856,26 +864,30 @@ async function sendChat(text, voice = null) {
 }
 $("#chat-form").onsubmit = (e) => { e.preventDefault(); sendChat(input.value.trim()); };
 
-// Voice: the dashboard records with the same microphone code as Task 1, then Whisper (or Gemma) writes the text.
+// Dictate: the dashboard records with the same microphone code as Task 1, then Whisper (or Gemma) writes the text
+// into the message box. You edit it and send it. Talk is the hands-free way: it sends and speaks the reply.
 let voiceOn = false;
+function setDictating(on) {
+  const b = $("#chat-voice");
+  voiceOn = on;
+  b.classList.toggle("recording", on);
+  b.setAttribute("aria-pressed", String(on));
+  b.querySelector("span").textContent = on ? "Stop" : "Dictate";
+}
 $("#chat-voice").onclick = async () => {
   const b = $("#chat-voice");
   if (!voiceOn) {
-    if (await busy(b, () => api("/api/chat/voice/start", {}))) {
-      voiceOn = true;
-      b.classList.add("recording");
-      b.setAttribute("aria-pressed", "true");
-      b.querySelector("span").textContent = "Stop and send";
-    }
+    if (await busy(b, () => api("/api/chat/voice/start", {}))) setDictating(true);
     return;
   }
-  voiceOn = false;
-  b.classList.remove("recording");
-  b.setAttribute("aria-pressed", "false");
-  b.dataset.busy = "Listening back…";
+  setDictating(false);
+  b.dataset.busy = "Writing it down…";
   const heard = await busy(b, () => api("/api/chat/voice/stop", {}));
-  b.querySelector("span").textContent = "Voice";
-  if (heard?.text) sendChat(heard.text, { engine: heard.engine, took_s: heard.took_s, audio_s: heard.audio_s });
+  if (!heard?.text) return;
+  input.value = input.value.trim() ? `${input.value.trimEnd()} ${heard.text}` : heard.text;
+  composer.voice = { engine: heard.engine, took_s: heard.took_s, audio_s: heard.audio_s };
+  growInput();
+  input.focus();
 };
 
 document.addEventListener("click", (e) => {

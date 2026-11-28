@@ -230,6 +230,11 @@ select { padding-right: 6px; cursor: pointer; }
 .tool-btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tool-btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 .tool-btn.recording, .tool-btn.recording:hover { color: #fff; background: var(--bad); border-color: var(--bad); animation: pulse 1.2s ease-in-out infinite; }
+.attach-menu { position: relative; }
+#attach-pop { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; display: flex; flex-direction: column; gap: 2px;
+  min-width: 230px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
+#attach-pop .tool-btn { justify-content: flex-start; color: var(--text); padding: 7px 10px; }
 #chat-attach { display: flex; flex-wrap: wrap; gap: 8px; }
 .attach { position: relative; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--accent);
   background: var(--accent-soft); border-radius: 8px; padding: 4px 26px 4px 6px; }
@@ -593,7 +598,7 @@ button.step-body.selected { border-color: var(--accent); background: var(--accen
   .chat-head { flex-wrap: wrap; }
   .chat-head h2 { display: none; }
   .chat-head .mic { margin-right: auto; }
-  .composer-bar .tool-btn span { display: none; }
+  .composer-bar > .tool-btn span, #attach-btn span { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
