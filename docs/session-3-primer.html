@@ -625,25 +625,25 @@ body.flow .next-cards.three { grid-template-columns: 1fr; }
   <h2>Part 1: one chat turn through brain.respond()</h2>
   
   <div class="walk" style="grid-template-columns:1.6fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/brain.py  respond()</div><pre class="code" data-blocks='[[325, 326, 0], [327, 329, 1], [330, 330, 2], [333, 340, 3], [341, 344, 4]]' data-src="agent/brain.py:325-333,336-344">query = " ".join(p["text"] for p in user if p["type"] == "text")
-names = tools.select(query or "help", config.MAX_TOOLS_PER_REQUEST)
-system = system_prompt() + (SPOKEN if spoken else "") + _waiting_calls()
-hits = _recall(query, use_memory)
-lines = [f"({m['when']}, {m['kind']}) {m['text']}" for m in hits]
-msgs, used = fit_budget(system, lines, history or [], user, tools.schemas(names))
-trace, retries_left = [], config.TOOL_RETRIES
-out = {"tool_calls": trace, "tokens": used, "tools_offered": names, "memories": hits}
-for step in range(max_steps):
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/brain.py  respond()</div><pre class="code" data-blocks='[[325, 326, 0], [327, 329, 1], [330, 330, 2], [333, 340, 3], [341, 344, 4]]' data-src="agent/brain.py:325-333,336-344">
+def _final_text(text: str, trace: list[dict], msgs: list[dict]) -&gt; str | None:
+    """Return the reply that ends a turn whose last model message has no tool call, or None to ask the model again.
+
+    A reply that claims an action in a turn with no tool call gets one retry with `NO_CALL_NOTE`. A second such
+    reply becomes `NO_CALL_REPLY`, so the user never hears a claim that nothing backs.
+
+    Args:
+        text (str): The model's reply.
 ...
-params = {"chat_template_kwargs": {"enable_thinking": True}} if step &gt; 0 else {}
-msg = send(msgs, tools=tools.schemas(names), **params)["choices"][0]["message"]
-calls = msg.get("tool_calls") or []
-if not calls:
-    return {"text": msg.get("content") or "", **out}
-msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
-retries_left = _handle_calls(calls, msgs, trace, retries_left)
-if (text := _fixed_reply(trace, retries_left)) is not None:
-    return {"text": text, **out}</pre></div></div>
+
+Returns:
+    str | None: The text that ends the turn, or None after the note was added.
+"""
+if trace or not CLAIM.search(text):
+    return text
+retried = msgs[-1]["content"] == NO_CALL_NOTE
+events.emit("brain.unbacked_claim", text=text, retried=retried)
+if retried:</pre></div></div>
     <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Offer 5 tools</b><span class="txt"><code>tools.select()</code> compares the request with an <span class="term" tabindex="0" data-def="A list of numbers that describes an input. Similar inputs get similar numbers.">embedding</span> of each tool, its description and example requests. Gemma gets the schemas of the 5 closest. No tool runs yet.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Add 3 memories</b><span class="txt">The 3 closest memories go into the system prompt, with their time and kind.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Fit the budget</b><span class="txt">Remove the oldest history, then the last memory, until the request fits: 16,384 tokens, minus 1,024 for the reply.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Send to Gemma</b><span class="txt">One local HTTP request goes to llama-server. Gemma replies with text or with the tool calls that it wants. Text ends the turn.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Run the calls, then send again</b><span class="txt"><code>tools.run()</code> calls <code>check()</code> first. The results go back to Gemma in the next step of the loop. A call that waits for approval ends the turn.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>16 synthetic requests.</dd><dt>Output</dt><dd>The tool call that Gemma makes.</dd><dt>Metrics</dt><dd>Exact tool calls 1.0 (limit 0.80). The right tool is in the 5 offered: 1.0.</dd></dl></li></ol>
   </div>
 </section>
@@ -712,7 +712,7 @@ _record(job_id, name, "execution", {})
 value = fn()
 _record(job_id, name, "result", value)
 return value</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>The schedule</b><span class="txt">Once a second, the <span class="term" tabindex="0" data-def="A program that runs in the background all the time, with no window. Here: python cli.py dashboard starts it, or python cli.py daemon start.">daemon</span> calls <code>due()</code>. It queues each due slot of <code>config.SCHEDULE</code>. After a sleep, only the newest missed slot runs.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Triggers</b><span class="txt">20 new transcripts queue a summary when a window closes.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One job</b><span class="txt">The oldest queued job runs: from the schedule, a trigger or the dashboard.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Skip what finished</b><span class="txt">A step with a stored result returns it. Its code does not run again.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Intent, run, result</b><span class="txt">Two rows go to SQLite before the code runs. Only the result row marks it as finished.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>3 jobs, each killed with kill -9 during a step.</dd><dt>Output</dt><dd>Steps that run again, and the time to the next step.</dd><dt>Metrics</dt><dd>0 steps redone, 0 jobs lost. 0.11 s to the next step (limit 10 s).</dd></dl></li></ol>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>The schedule</b><span class="txt">Once a second, the <span class="term" tabindex="0" data-def="A program that runs in the background all the time, with no window. Here: python cli.py dashboard starts it, or python cli.py daemon start.">daemon</span> checks the clock with <code>due()</code>. It queues a job only when a slot of <code>config.SCHEDULE</code> arrives (summaries every 15 minutes, the brief at 18:00). After a sleep, only the newest missed slot runs.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Triggers</b><span class="txt">20 new transcripts queue a summary when a window closes.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>One job</b><span class="txt">The oldest queued job runs: from the schedule, a trigger or the dashboard.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Skip what finished</b><span class="txt">A step with a stored result returns it. Its code does not run again.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Intent, run, result</b><span class="txt">Two rows go to SQLite before the code runs. Only the result row marks it as finished.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>3 jobs, each killed with kill -9 during a step.</dd><dt>Output</dt><dd>Steps that run again, and the time to the next step.</dd><dt>Metrics</dt><dd>0 steps redone, 0 jobs lost. 0.11 s to the next step (limit 10 s).</dd></dl></li></ol>
   </div>
 </section>
 <section class="slide" data-type="content" data-part="p2" data-title="Part 2: hear, remember, learn" id="s-p2more">
@@ -733,7 +733,7 @@ return value</pre></div></div>
 <section class="slide" data-type="title" data-title="Section: Part 3">
   <p class="eyebrow">Multimodal Personal Agent</p>
   <h1 class="paper-title">Voice, native skills, MCP connectors</h1>
-  <p class="series">Now the agent speaks, wakes on its name, speaks up without a question, and uses tools from other programs.</p>
+  <p class="series">Now the agent speaks, wakes on its name, speaks up on its own, and uses tools from other programs.</p>
 </section>
 <section class="slide" data-type="content" data-part="start" data-title="The goal" id="s-goal" data-part-label="Start">
   <h2>The goal: an agent that you talk to</h2>
@@ -1008,8 +1008,8 @@ details {"engine": "whisper", "took_s": 0.62,
         </div>
       </div><div class="fpane" data-i="2">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/brain.py</div><pre class="code" data-src="agent/brain.py:326-327">names = tools.select(query or "help", config.MAX_TOOLS_PER_REQUEST)
-system = system_prompt() + (SPOKEN if spoken else "") + _waiting_calls()</pre></div><p class="fexplain">The 5 closest tools go into the request. A spoken turn adds SPOKEN to the system prompt.</p></div>
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/brain.py</div><pre class="code" data-src="agent/brain.py:326-327">def _final_text(text: str, trace: list[dict], msgs: list[dict]) -&gt; str | None:
+    """Return the reply that ends a turn whose last model message has no tool call, or None to ask the model again.</pre></div><p class="fexplain">The 5 closest tools go into the request. A spoken turn adds SPOKEN to the system prompt.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">names ["reminders__add_reminder", "get_time",
        "save_note", "unit_convert", "search_memory"]
 
