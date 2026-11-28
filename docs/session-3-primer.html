@@ -625,26 +625,26 @@ body.flow .next-cards.three { grid-template-columns: 1fr; }
   <h2>Part 1: one chat turn through brain.respond()</h2>
   
   <div class="walk" style="grid-template-columns:1.6fr 1fr">
-    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/brain.py  respond()</div><pre class="code" data-blocks='[[325, 326, 0], [327, 329, 1], [330, 330, 2], [333, 340, 3], [341, 344, 4]]' data-src="agent/brain.py:325-333,336-344">
-def _final_text(text: str, trace: list[dict], msgs: list[dict]) -&gt; str | None:
-    """Return the reply that ends a turn whose last model message has no tool call, or None to ask the model again.
-
-    A reply that claims an action in a turn with no tool call gets one retry with `NO_CALL_NOTE`. A second such
-    reply becomes `NO_CALL_REPLY`, so the user never hears a claim that nothing backs.
-
-    Args:
-        text (str): The model's reply.
+    <div class="walk-code"><div class="code-wrap"><div class="code-file">agent/brain.py  respond()</div><pre class="code" data-blocks='[[393, 394, 0], [395, 397, 1], [398, 398, 2], [401, 405, 3], [406, 413, 4]]' data-src="agent/brain.py:393-398,401,404-413">query = " ".join(p["text"] for p in user if p["type"] == "text")
+names = select_tools(query, history or [])
+system = system_prompt() + (SPOKEN if spoken else "") + _waiting_calls()
+hits = _recall(query, use_memory)
+lines = [f"({m['when']}, {m['kind']}) {m['text']}" for m in hits]
+msgs, used = fit_budget(system, lines, history or [], user, tools.schemas(names))
 ...
-
-Returns:
-    str | None: The text that ends the turn, or None after the note was added.
-"""
-if trace or not CLAIM.search(text):
-    return text
-retried = msgs[-1]["content"] == NO_CALL_NOTE
-events.emit("brain.unbacked_claim", text=text, retried=retried)
-if retried:</pre></div></div>
-    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Offer 5 tools</b><span class="txt"><code>tools.select()</code> compares the request with an <span class="term" tabindex="0" data-def="A list of numbers that describes an input. Similar inputs get similar numbers.">embedding</span> of each tool, its description and example requests. Gemma gets the schemas of the 5 closest. No tool runs yet.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Add 3 memories</b><span class="txt">The 3 closest memories go into the system prompt, with their time and kind.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Fit the budget</b><span class="txt">Remove the oldest history, then the last memory, until the request fits: 16,384 tokens, minus 1,024 for the reply.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Send to Gemma</b><span class="txt">One local HTTP request goes to llama-server. Gemma replies with text or with the tool calls that it wants. Text ends the turn.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Run the calls, then send again</b><span class="txt"><code>tools.run()</code> calls <code>check()</code> first. The results go back to Gemma in the next step of the loop. A call that waits for approval ends the turn.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>16 synthetic requests.</dd><dt>Output</dt><dd>The tool call that Gemma makes.</dd><dt>Metrics</dt><dd>Exact tool calls 1.0 (limit 0.80). The right tool is in the 5 offered: 1.0.</dd></dl></li></ol>
+for step in range(max_steps):
+...
+params = {"chat_template_kwargs": {"enable_thinking": True}} if step &gt; 0 else {}
+msg = send(msgs, tools=tools.schemas(names), **params)["choices"][0]["message"]
+if calls := msg.get("tool_calls") or []:
+    msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+    retries_left = _handle_calls(calls, msgs, trace, retries_left)
+    text = _fixed_reply(trace, retries_left)
+else:
+    text = _final_text(msg.get("content") or "", trace, msgs)
+if text is not None:
+    return {"text": text, **out}</pre></div></div>
+    <ol class="walk-cards"><li class="walk-card" data-card="0" tabindex="0"><span class="num">1</span><b>Offer 5 tools</b><span class="txt"><code>select_tools()</code> compares the request and your last 3 messages with an <span class="term" tabindex="0" data-def="A list of numbers that describes an input. Similar inputs get similar numbers.">embedding</span> of each tool. Gemma gets the 5 closest. No tool runs yet.</span></li><li class="walk-card" data-card="1" tabindex="0"><span class="num">2</span><b>Add 3 memories</b><span class="txt">The 3 closest memories go into the system prompt, with their time and kind.</span></li><li class="walk-card" data-card="2" tabindex="0"><span class="num">3</span><b>Fit the budget</b><span class="txt">Remove the oldest history, then memories, until it fits: 16,384 tokens, minus 1,024 for the reply.</span></li><li class="walk-card" data-card="3" tabindex="0"><span class="num">4</span><b>Send to Gemma</b><span class="txt">One local HTTP request goes to llama-server. Gemma replies with text or with tool calls.</span></li><li class="walk-card" data-card="4" tabindex="0"><span class="num">5</span><b>Run the calls, or check the text</b><span class="txt"><code>check()</code> runs first, and the results go back to Gemma. A call that waits for approval ends the turn. A claim with no call gets one retry.</span></li><li class="walk-note measure"><b>How we measure it</b><dl class="measure-io"><dt>Input</dt><dd>16 synthetic requests.</dd><dt>Output</dt><dd>The tool call that Gemma makes.</dd><dt>Metrics</dt><dd>Exact tool calls 1.0 (limit 0.80). The right tool is in the 5 offered: 1.0.</dd></dl></li></ol>
   </div>
 </section>
 <section class="slide" data-type="content" data-part="p1" data-title="Part 1: check()" id="s-p1check">
@@ -1008,8 +1008,8 @@ details {"engine": "whisper", "took_s": 0.62,
         </div>
       </div><div class="fpane" data-i="2">
         <div class="fgrid">
-          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/brain.py</div><pre class="code" data-src="agent/brain.py:326-327">def _final_text(text: str, trace: list[dict], msgs: list[dict]) -&gt; str | None:
-    """Return the reply that ends a turn whose last model message has no tool call, or None to ask the model again.</pre></div><p class="fexplain">The 5 closest tools go into the request. A spoken turn adds SPOKEN to the system prompt.</p></div>
+          <div class="fleft"><div class="code-wrap"><div class="code-file">agent/brain.py</div><pre class="code" data-src="agent/brain.py:394-395">names = select_tools(query, history or [])
+system = system_prompt() + (SPOKEN if spoken else "") + _waiting_calls()</pre></div><p class="fexplain">The 5 tools closest to the request and your last 3 messages go into the request. A spoken turn adds SPOKEN to the system prompt.</p></div>
           <div class="fdata"><div class="code-file">Data at this step: example values in the real format</div><pre class="data">names ["reminders__add_reminder", "get_time",
        "save_note", "unit_convert", "search_memory"]
 
